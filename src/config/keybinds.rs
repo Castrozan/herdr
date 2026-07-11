@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use super::Config;
+use super::{Config, CopyModeCommand, CopyModeCommandSpec};
 use crate::input::TerminalKey;
 
 pub type KeyCombo = (KeyCode, KeyModifiers);
@@ -106,6 +106,33 @@ impl Default for CommandKeybindConfig {
             description: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CopyModeKeybindConfig {
+    /// Key that runs a copy-mode command while copy mode is active. Modal keys
+    /// are matched directly; `prefix+` is not valid inside the copy-mode keytable.
+    pub key: BindingConfig,
+    /// Copy-mode command this key runs. An unknown name disables only this
+    /// entry rather than failing the whole `[keys]` section.
+    pub command: CopyModeCommandSpec,
+    /// Number of times a repeatable command runs per key press. Default: 1.
+    #[serde(default = "default_copy_mode_count")]
+    pub count: u16,
+    /// Optional user-defined description for this copy-mode binding.
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+fn default_copy_mode_count() -> u16 {
+    1
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledCopyModeBinding {
+    pub bindings: ActionKeybinds,
+    pub command: CopyModeCommand,
+    pub count: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -346,6 +373,7 @@ pub struct Keybinds {
     pub resize_mode: ActionKeybinds,
     pub toggle_sidebar: ActionKeybinds,
     pub custom_commands: Vec<CustomCommandKeybind>,
+    pub copy_mode_commands: Vec<CompiledCopyModeBinding>,
 }
 
 impl Default for Keybinds {
@@ -508,6 +536,7 @@ impl Config {
             resize_mode: empty_action!(),
             toggle_sidebar: empty_action!(),
             custom_commands: Vec::new(),
+            copy_mode_commands: Vec::new(),
         };
 
         macro_rules! field_source {
@@ -686,6 +715,9 @@ impl Config {
             }
         }
 
+        keybinds.copy_mode_commands =
+            compile_copy_mode_bindings(&self.keys.copy_mode_command, &mut diagnostics);
+
         (prefix_diag, prefix, diagnostics, keybinds)
     }
 }
@@ -754,6 +786,162 @@ fn append_custom_command_bindings(
             description: command.description.clone(),
         });
     }
+}
+
+fn compile_copy_mode_bindings(
+    user: &[CopyModeKeybindConfig],
+    diagnostics: &mut Vec<String>,
+) -> Vec<CompiledCopyModeBinding> {
+    let mut compiled = Vec::new();
+    let mut registered: std::collections::HashSet<KeyCombo> = std::collections::HashSet::new();
+    for (index, entry) in user.iter().enumerate() {
+        let field = format!("keys.copy_mode_command[{index}].key");
+        push_copy_mode_binding(
+            &field,
+            entry,
+            BindingSource::User,
+            &mut registered,
+            diagnostics,
+            &mut compiled,
+        );
+    }
+    for entry in default_copy_mode_bindings() {
+        push_copy_mode_binding(
+            "keys.copy_mode_command default",
+            &entry,
+            BindingSource::Default,
+            &mut registered,
+            diagnostics,
+            &mut compiled,
+        );
+    }
+    compiled
+}
+
+fn push_copy_mode_binding(
+    field: &str,
+    entry: &CopyModeKeybindConfig,
+    source: BindingSource,
+    registered: &mut std::collections::HashSet<KeyCombo>,
+    diagnostics: &mut Vec<String>,
+    compiled: &mut Vec<CompiledCopyModeBinding>,
+) {
+    let command = match &entry.command {
+        CopyModeCommandSpec::Known(command) => *command,
+        CopyModeCommandSpec::Unknown(name) => {
+            let diag = format!("unknown copy-mode command '{name}' for {field}; disabling binding");
+            warn!(message = %diag, "config diagnostic");
+            diagnostics.push(diag);
+            return;
+        }
+    };
+    if !entry.key.has_values() {
+        let diag = format!("copy-mode keybinding has no key: {field}; disabling binding");
+        warn!(message = %diag, "config diagnostic");
+        diagnostics.push(diag);
+        return;
+    }
+    let mut bindings = Vec::new();
+    for raw in entry.key.values() {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        match parse_binding_string(raw) {
+            Some(ParsedBinding::Single(binding)) => {
+                if binding.trigger.is_prefix() {
+                    let diag = format!(
+                        "copy-mode keybinding cannot use prefix: {field} = {:?}; disabling binding",
+                        binding.label
+                    );
+                    warn!(message = %diag, "config diagnostic");
+                    diagnostics.push(diag);
+                    continue;
+                }
+                let combo = normalize_key_combo(binding.trigger.combo());
+                if !registered.insert(combo) {
+                    if source == BindingSource::User {
+                        let diag = format!(
+                            "duplicate copy-mode keybinding: {field} = {:?}; disabling binding",
+                            binding.label
+                        );
+                        warn!(message = %diag, "config diagnostic");
+                        diagnostics.push(diag);
+                    }
+                    continue;
+                }
+                bindings.push(binding);
+            }
+            Some(ParsedBinding::Range(_)) => {
+                let diag = format!(
+                    "range keybinding is only valid for indexed actions: {field} = {raw:?}; disabling binding"
+                );
+                warn!(message = %diag, "config diagnostic");
+                diagnostics.push(diag);
+            }
+            None => {
+                let diag = format!("invalid keybinding: {field} = {raw:?}; disabling binding");
+                warn!(message = %diag, "config diagnostic");
+                diagnostics.push(diag);
+            }
+        }
+    }
+    if bindings.is_empty() {
+        return;
+    }
+    compiled.push(CompiledCopyModeBinding {
+        bindings: ActionKeybinds { bindings },
+        command,
+        count: entry.count.max(1),
+    });
+}
+
+fn default_copy_mode_bindings() -> Vec<CopyModeKeybindConfig> {
+    fn binding(keys: &[&str]) -> BindingConfig {
+        match keys {
+            [single] => BindingConfig::one(*single),
+            _ => BindingConfig::Many(keys.iter().map(|key| (*key).to_string()).collect()),
+        }
+    }
+    fn entry(keys: &[&str], command: CopyModeCommand, count: u16) -> CopyModeKeybindConfig {
+        CopyModeKeybindConfig {
+            key: binding(keys),
+            command: CopyModeCommandSpec::Known(command),
+            count,
+            description: None,
+        }
+    }
+    vec![
+        entry(&["left", "h"], CopyModeCommand::CursorLeft, 1),
+        entry(&["down", "j"], CopyModeCommand::CursorDown, 1),
+        entry(&["up", "k"], CopyModeCommand::CursorUp, 1),
+        entry(&["right", "l"], CopyModeCommand::CursorRight, 1),
+        entry(&["ctrl+shift+up"], CopyModeCommand::CursorUp, 5),
+        entry(&["ctrl+shift+down"], CopyModeCommand::CursorDown, 5),
+        entry(&["home", "0"], CopyModeCommand::StartOfLine, 1),
+        entry(&["end", "$"], CopyModeCommand::EndOfLine, 1),
+        entry(&["^"], CopyModeCommand::BackToIndentation, 1),
+        entry(&["g"], CopyModeCommand::HistoryTop, 1),
+        entry(&["G"], CopyModeCommand::HistoryBottom, 1),
+        entry(&["pageup", "ctrl+b"], CopyModeCommand::PageUp, 1),
+        entry(&["pagedown", "ctrl+f"], CopyModeCommand::PageDown, 1),
+        entry(&["ctrl+u"], CopyModeCommand::HalfpageUp, 1),
+        entry(&["ctrl+d"], CopyModeCommand::HalfpageDown, 1),
+        entry(&["w"], CopyModeCommand::NextWord, 1),
+        entry(&["b"], CopyModeCommand::PreviousWord, 1),
+        entry(&["e"], CopyModeCommand::NextWordEnd, 1),
+        entry(&["{"], CopyModeCommand::PreviousParagraph, 1),
+        entry(&["}"], CopyModeCommand::NextParagraph, 1),
+        entry(&["v", "space"], CopyModeCommand::BeginSelection, 1),
+        entry(&["V"], CopyModeCommand::SelectLine, 1),
+        entry(&["y", "enter"], CopyModeCommand::CopySelection, 1),
+        entry(&["q"], CopyModeCommand::Cancel, 1),
+        entry(&["esc"], CopyModeCommand::ClearSelectionOrCancel, 1),
+        entry(&["/"], CopyModeCommand::SearchForward, 1),
+        entry(&["?"], CopyModeCommand::SearchBackward, 1),
+        entry(&["n"], CopyModeCommand::SearchAgain, 1),
+        entry(&["N"], CopyModeCommand::SearchReverse, 1),
+    ]
 }
 
 fn parse_action_bindings(
@@ -1213,6 +1401,10 @@ pub(crate) fn parse_key_combo(s: &str) -> Option<KeyCombo> {
         "right" => KeyCode::Right,
         "up" => KeyCode::Up,
         "down" => KeyCode::Down,
+        "pageup" | "page_up" => KeyCode::PageUp,
+        "pagedown" | "page_down" => KeyCode::PageDown,
+        "home" => KeyCode::Home,
+        "end" => KeyCode::End,
         "minus" => KeyCode::Char('-'),
         "comma" => KeyCode::Char(','),
         "period" => KeyCode::Char('.'),
@@ -1567,6 +1759,163 @@ next_tab = "prefix+n"
                 KeyCode::Char('['),
                 KeyModifiers::empty()
             ))]
+        );
+    }
+
+    #[test]
+    fn default_copy_mode_table_includes_ctrl_shift_up_jump() {
+        let kb = Config::default().keybinds();
+        let jump = kb
+            .copy_mode_commands
+            .iter()
+            .find(|binding| {
+                binding.bindings.matches_direct_key(TerminalKey::new(
+                    KeyCode::Up,
+                    KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+                ))
+            })
+            .expect("ctrl+shift+up jump binding");
+        assert_eq!(jump.command, CopyModeCommand::CursorUp);
+        assert_eq!(jump.count, 5);
+    }
+
+    #[test]
+    fn user_copy_mode_binding_overrides_default_command() {
+        let config: Config = toml::from_str(
+            r#"
+[[keys.copy_mode_command]]
+key = "h"
+command = "cursor-down"
+"#,
+        )
+        .unwrap();
+        let kb = config.keybinds();
+        let matched = kb
+            .copy_mode_commands
+            .iter()
+            .find(|binding| {
+                binding
+                    .bindings
+                    .matches_direct_key(TerminalKey::new(KeyCode::Char('h'), KeyModifiers::empty()))
+            })
+            .expect("h binding");
+        assert_eq!(matched.command, CopyModeCommand::CursorDown);
+    }
+
+    #[test]
+    fn copy_mode_binding_does_not_register_globally() {
+        let config: Config = toml::from_str(
+            r#"
+[[keys.copy_mode_command]]
+key = "h"
+command = "cursor-down"
+"#,
+        )
+        .unwrap();
+        let diagnostics = config.collect_diagnostics();
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diag| !diag.contains("unsafe direct keybinding")),
+            "copy-mode key must bypass the global unsafe-direct guard: {diagnostics:?}"
+        );
+        let kb = config.keybinds();
+        assert!(kb.custom_commands.is_empty());
+        assert!(kb.copy_mode_commands.iter().any(|binding| {
+            binding.command == CopyModeCommand::CursorDown
+                && binding
+                    .bindings
+                    .matches_direct_key(TerminalKey::new(KeyCode::Char('h'), KeyModifiers::empty()))
+        }));
+    }
+
+    #[test]
+    fn partial_single_key_override_keeps_sibling_alias_and_other_defaults() {
+        let config: Config = toml::from_str(
+            r#"
+[[keys.copy_mode_command]]
+key = "h"
+command = "cursor-down"
+"#,
+        )
+        .unwrap();
+        let kb = config.keybinds();
+        let command_for = |key: TerminalKey| {
+            kb.copy_mode_commands
+                .iter()
+                .find(|binding| binding.bindings.matches_direct_key(key))
+                .map(|binding| binding.command)
+        };
+        assert_eq!(
+            command_for(TerminalKey::new(KeyCode::Char('h'), KeyModifiers::empty())),
+            Some(CopyModeCommand::CursorDown)
+        );
+        assert_eq!(
+            command_for(TerminalKey::new(KeyCode::Left, KeyModifiers::empty())),
+            Some(CopyModeCommand::CursorLeft)
+        );
+        assert_eq!(
+            command_for(TerminalKey::new(KeyCode::Char('j'), KeyModifiers::empty())),
+            Some(CopyModeCommand::CursorDown)
+        );
+        assert_eq!(
+            command_for(TerminalKey::new(KeyCode::Char('g'), KeyModifiers::empty())),
+            Some(CopyModeCommand::HistoryTop)
+        );
+    }
+
+    #[test]
+    fn unknown_copy_mode_command_disables_only_that_entry() {
+        let config: Config = toml::from_str(
+            r#"
+[[keys.copy_mode_command]]
+key = "h"
+command = "teleport"
+
+[[keys.copy_mode_command]]
+key = "x"
+command = "cursor-down"
+"#,
+        )
+        .unwrap();
+        let diagnostics = config.collect_diagnostics();
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diag| diag.contains("unknown copy-mode command 'teleport'")),
+            "expected unknown-command diagnostic: {diagnostics:?}"
+        );
+        let kb = config.keybinds();
+        assert!(kb.copy_mode_commands.iter().any(|binding| {
+            binding.command == CopyModeCommand::CursorDown
+                && binding
+                    .bindings
+                    .matches_direct_key(TerminalKey::new(KeyCode::Char('x'), KeyModifiers::empty()))
+        }));
+        assert!(kb.copy_mode_commands.iter().any(|binding| {
+            binding.command == CopyModeCommand::CursorLeft
+                && binding
+                    .bindings
+                    .matches_direct_key(TerminalKey::new(KeyCode::Char('h'), KeyModifiers::empty()))
+        }));
+    }
+
+    #[test]
+    fn copy_mode_binding_without_key_reports_diagnostic() {
+        let config: Config = toml::from_str(
+            r#"
+[[keys.copy_mode_command]]
+key = ""
+command = "cursor-down"
+"#,
+        )
+        .unwrap();
+        let diagnostics = config.collect_diagnostics();
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diag| diag.contains("copy-mode keybinding has no key")),
+            "expected no-key diagnostic: {diagnostics:?}"
         );
     }
 

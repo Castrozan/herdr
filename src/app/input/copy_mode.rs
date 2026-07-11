@@ -6,6 +6,7 @@ use crate::{
         state::{CopyModeSearchDirection, CopyModeSearchPrompt, CopyModeSelection, CopyModeState},
         App, AppState, Mode,
     },
+    config::{CompiledCopyModeBinding, CopyModeCommand},
     input::TerminalKey,
     selection::Selection,
     terminal::TerminalRuntimeRegistry,
@@ -92,115 +93,103 @@ impl AppState {
         if self.handle_copy_mode_search_prompt_key(terminal_runtimes, key) {
             return;
         }
-        match key.code {
-            KeyCode::Esc => {
-                let should_clear = self.copy_mode.as_ref().is_some_and(|copy_mode| {
-                    copy_mode.selection.is_some()
-                        || !copy_mode.search.query.is_empty()
-                        || !copy_mode.search.matches.is_empty()
-                        || copy_mode.search.direction.is_some()
-                });
-                if should_clear {
-                    self.clear_copy_mode_selection();
-                    if let Some(search) = self
-                        .copy_mode
-                        .as_mut()
-                        .map(|copy_mode| &mut copy_mode.search)
-                    {
-                        let geometry = search.geometry;
-                        *search = crate::app::state::CopyModeSearchState {
-                            geometry,
-                            ..Default::default()
-                        };
-                    }
-                    return;
-                }
-                self.exit_copy_mode(terminal_runtimes, false);
-                return;
-            }
-            KeyCode::Enter => {
-                self.exit_copy_mode(terminal_runtimes, true);
-                return;
-            }
-            KeyCode::Left => {
-                self.move_copy_cursor(terminal_runtimes, 0, -1);
-                return;
-            }
-            KeyCode::Down => {
-                self.move_copy_cursor(terminal_runtimes, 1, 0);
-                return;
-            }
-            KeyCode::Up => {
-                self.move_copy_cursor(terminal_runtimes, -1, 0);
-                return;
-            }
-            KeyCode::Right => {
-                self.move_copy_cursor(terminal_runtimes, 0, 1);
-                return;
-            }
-            KeyCode::PageUp => {
-                self.scroll_copy_mode_page(terminal_runtimes, -1, false);
-                return;
-            }
-            KeyCode::PageDown => {
-                self.scroll_copy_mode_page(terminal_runtimes, 1, false);
-                return;
-            }
-            KeyCode::Home => {
-                self.copy_mode_line_edge(terminal_runtimes, false);
-                return;
-            }
-            KeyCode::End => {
-                self.copy_mode_line_edge(terminal_runtimes, true);
-                return;
-            }
-            _ => {}
-        }
-
-        match (key.code, key.modifiers) {
-            (KeyCode::Char('b'), mods) if mods.contains(KeyModifiers::CONTROL) => {
-                self.scroll_copy_mode_page(terminal_runtimes, -1, false)
-            }
-            (KeyCode::Char('f'), mods) if mods.contains(KeyModifiers::CONTROL) => {
-                self.scroll_copy_mode_page(terminal_runtimes, 1, false)
-            }
-            (KeyCode::Char('u'), mods) if mods.contains(KeyModifiers::CONTROL) => {
-                self.scroll_copy_mode_page(terminal_runtimes, -1, true)
-            }
-            (KeyCode::Char('d'), mods) if mods.contains(KeyModifiers::CONTROL) => {
-                self.scroll_copy_mode_page(terminal_runtimes, 1, true)
-            }
-            _ => {}
-        }
-
-        let Some(ch) = copy_mode_command_char(key) else {
+        let Some(binding) = self.matched_copy_mode_binding(key) else {
             return;
         };
-        match ch {
-            'q' => self.exit_copy_mode(terminal_runtimes, false),
-            'y' => self.exit_copy_mode(terminal_runtimes, true),
-            'v' | ' ' => self.begin_copy_mode_selection(terminal_runtimes),
-            'V' => self.select_copy_mode_line(terminal_runtimes),
-            'h' => self.move_copy_cursor(terminal_runtimes, 0, -1),
-            'j' => self.move_copy_cursor(terminal_runtimes, 1, 0),
-            'k' => self.move_copy_cursor(terminal_runtimes, -1, 0),
-            'l' => self.move_copy_cursor(terminal_runtimes, 0, 1),
-            'g' => self.copy_mode_history_top(terminal_runtimes),
-            'G' => self.copy_mode_history_bottom(terminal_runtimes),
-            '0' => self.copy_mode_line_edge(terminal_runtimes, false),
-            '$' => self.copy_mode_line_edge(terminal_runtimes, true),
-            '^' => self.copy_mode_first_non_blank(terminal_runtimes),
-            '/' => self.open_copy_mode_search(CopyModeSearchDirection::Forward),
-            '?' => self.open_copy_mode_search(CopyModeSearchDirection::Backward),
-            'n' => self.repeat_copy_mode_search(terminal_runtimes, false),
-            'N' => self.repeat_copy_mode_search(terminal_runtimes, true),
-            'w' => self.copy_mode_word_motion(terminal_runtimes, WordMotion::NextStart),
-            'b' => self.copy_mode_word_motion(terminal_runtimes, WordMotion::PreviousStart),
-            'e' => self.copy_mode_word_motion(terminal_runtimes, WordMotion::NextEnd),
-            '{' => self.copy_mode_paragraph(terminal_runtimes, -1),
-            '}' => self.copy_mode_paragraph(terminal_runtimes, 1),
-            _ => {}
+        for _ in 0..copy_mode_repeat_count(&binding) {
+            self.dispatch_copy_mode_command(terminal_runtimes, binding.command);
         }
+    }
+
+    fn matched_copy_mode_binding(&self, key: TerminalKey) -> Option<CompiledCopyModeBinding> {
+        if let Some(binding) = self
+            .keybinds
+            .copy_mode_commands
+            .iter()
+            .find(|binding| binding.bindings.matches_direct_key(key))
+        {
+            return Some(binding.clone());
+        }
+        let ch = copy_mode_command_char(key)?;
+        let folded = TerminalKey::new(KeyCode::Char(ch), KeyModifiers::empty());
+        self.keybinds
+            .copy_mode_commands
+            .iter()
+            .find(|binding| binding.bindings.matches_direct_key(folded))
+            .cloned()
+    }
+
+    fn dispatch_copy_mode_command(
+        &mut self,
+        terminal_runtimes: &TerminalRuntimeRegistry,
+        command: CopyModeCommand,
+    ) {
+        match command {
+            CopyModeCommand::CursorLeft => self.move_copy_cursor(terminal_runtimes, 0, -1),
+            CopyModeCommand::CursorDown => self.move_copy_cursor(terminal_runtimes, 1, 0),
+            CopyModeCommand::CursorUp => self.move_copy_cursor(terminal_runtimes, -1, 0),
+            CopyModeCommand::CursorRight => self.move_copy_cursor(terminal_runtimes, 0, 1),
+            CopyModeCommand::StartOfLine => self.copy_mode_line_edge(terminal_runtimes, false),
+            CopyModeCommand::EndOfLine => self.copy_mode_line_edge(terminal_runtimes, true),
+            CopyModeCommand::BackToIndentation => self.copy_mode_first_non_blank(terminal_runtimes),
+            CopyModeCommand::HistoryTop => self.copy_mode_history_top(terminal_runtimes),
+            CopyModeCommand::HistoryBottom => self.copy_mode_history_bottom(terminal_runtimes),
+            CopyModeCommand::PageUp => self.scroll_copy_mode_page(terminal_runtimes, -1, false),
+            CopyModeCommand::PageDown => self.scroll_copy_mode_page(terminal_runtimes, 1, false),
+            CopyModeCommand::HalfpageUp => self.scroll_copy_mode_page(terminal_runtimes, -1, true),
+            CopyModeCommand::HalfpageDown => self.scroll_copy_mode_page(terminal_runtimes, 1, true),
+            CopyModeCommand::NextWord => {
+                self.copy_mode_word_motion(terminal_runtimes, WordMotion::NextStart)
+            }
+            CopyModeCommand::PreviousWord => {
+                self.copy_mode_word_motion(terminal_runtimes, WordMotion::PreviousStart)
+            }
+            CopyModeCommand::NextWordEnd => {
+                self.copy_mode_word_motion(terminal_runtimes, WordMotion::NextEnd)
+            }
+            CopyModeCommand::PreviousParagraph => self.copy_mode_paragraph(terminal_runtimes, -1),
+            CopyModeCommand::NextParagraph => self.copy_mode_paragraph(terminal_runtimes, 1),
+            CopyModeCommand::BeginSelection => self.begin_copy_mode_selection(terminal_runtimes),
+            CopyModeCommand::SelectLine => self.select_copy_mode_line(terminal_runtimes),
+            CopyModeCommand::CopySelection => self.exit_copy_mode(terminal_runtimes, true),
+            CopyModeCommand::Cancel => self.exit_copy_mode(terminal_runtimes, false),
+            CopyModeCommand::ClearSelectionOrCancel => {
+                self.clear_copy_mode_selection_or_cancel(terminal_runtimes)
+            }
+            CopyModeCommand::SearchForward => {
+                self.open_copy_mode_search(CopyModeSearchDirection::Forward)
+            }
+            CopyModeCommand::SearchBackward => {
+                self.open_copy_mode_search(CopyModeSearchDirection::Backward)
+            }
+            CopyModeCommand::SearchAgain => self.repeat_copy_mode_search(terminal_runtimes, false),
+            CopyModeCommand::SearchReverse => self.repeat_copy_mode_search(terminal_runtimes, true),
+        }
+    }
+
+    fn clear_copy_mode_selection_or_cancel(&mut self, terminal_runtimes: &TerminalRuntimeRegistry) {
+        let should_clear = self.copy_mode.as_ref().is_some_and(|copy_mode| {
+            copy_mode.selection.is_some()
+                || !copy_mode.search.query.is_empty()
+                || !copy_mode.search.matches.is_empty()
+                || copy_mode.search.direction.is_some()
+        });
+        if should_clear {
+            self.clear_copy_mode_selection();
+            if let Some(search) = self
+                .copy_mode
+                .as_mut()
+                .map(|copy_mode| &mut copy_mode.search)
+            {
+                let geometry = search.geometry;
+                *search = crate::app::state::CopyModeSearchState {
+                    geometry,
+                    ..Default::default()
+                };
+            }
+            return;
+        }
+        self.exit_copy_mode(terminal_runtimes, false);
     }
 
     fn handle_copy_mode_search_prompt_key(
@@ -942,6 +931,14 @@ fn copy_mode_page_lines(height: u16, half_page: bool) -> usize {
         usize::from(height / 2)
     } else {
         usize::from(height - 2)
+    }
+}
+
+fn copy_mode_repeat_count(binding: &CompiledCopyModeBinding) -> u16 {
+    if binding.command.is_repeatable() {
+        binding.count.max(1)
+    } else {
+        1
     }
 }
 
@@ -1965,5 +1962,67 @@ mod tests {
         assert_eq!(copy_mode_clipboard_text(&mut app), "alp");
         assert_eq!(app.state.mode, Mode::Terminal);
         assert!(app.state.copy_mode.is_none());
+    }
+
+    #[tokio::test]
+    async fn copy_mode_user_override_changes_dispatch() {
+        let config: crate::config::Config = toml::from_str(
+            r#"
+[[keys.copy_mode_command]]
+key = "h"
+command = "cursor-down"
+"#,
+        )
+        .expect("config");
+        let (mut app, _) = app_with_copy_screen(b"alpha\nbeta\n");
+        app.state.keybinds = config.keybinds();
+        app.state.enter_copy_mode(&app.terminal_runtimes);
+        if let Some(copy_mode) = app.state.copy_mode.as_mut() {
+            copy_mode.cursor_row = 0;
+            copy_mode.cursor_col = 3;
+        }
+
+        app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('h'), KeyModifiers::empty()));
+
+        let copy_mode = app.state.copy_mode.as_ref().expect("copy mode");
+        assert_eq!(copy_mode.cursor_row, 1);
+        assert_eq!(copy_mode.cursor_col, 3);
+    }
+
+    #[tokio::test]
+    async fn copy_mode_ctrl_shift_up_jumps_five_lines() {
+        let bytes = numbered_lines_bytes(64);
+        let (mut app, pane_id) = app_with_copy_scrollback(&bytes);
+        app.state.enter_copy_mode(&app.terminal_runtimes);
+        let before = copy_mode_viewport_top_row(&app, pane_id)
+            + usize::from(app.state.copy_mode.as_ref().expect("copy mode").cursor_row);
+
+        app.handle_copy_mode_key(TerminalKey::new(
+            KeyCode::Up,
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        ));
+
+        let after = copy_mode_viewport_top_row(&app, pane_id)
+            + usize::from(app.state.copy_mode.as_ref().expect("copy mode").cursor_row);
+        assert_eq!(before - after, 5);
+    }
+
+    #[test]
+    fn non_repeatable_copy_mode_command_runs_once_regardless_of_count() {
+        let non_repeatable = CompiledCopyModeBinding {
+            bindings: crate::config::ActionKeybinds::default(),
+            command: CopyModeCommand::BeginSelection,
+            count: 5,
+        };
+        assert!(!non_repeatable.command.is_repeatable());
+        assert_eq!(copy_mode_repeat_count(&non_repeatable), 1);
+
+        let repeatable = CompiledCopyModeBinding {
+            bindings: crate::config::ActionKeybinds::default(),
+            command: CopyModeCommand::CursorUp,
+            count: 5,
+        };
+        assert!(repeatable.command.is_repeatable());
+        assert_eq!(copy_mode_repeat_count(&repeatable), 5);
     }
 }
