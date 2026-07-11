@@ -11,6 +11,8 @@ use crate::{
     terminal::TerminalRuntimeRegistry,
 };
 
+const COPY_MODE_LINE_JUMP: usize = 5;
+
 impl App {
     pub(crate) fn handle_copy_mode_key(&mut self, key: TerminalKey) {
         if key.kind == KeyEventKind::Release {
@@ -90,6 +92,16 @@ impl AppState {
         key: TerminalKey,
     ) {
         if self.handle_copy_mode_search_prompt_key(terminal_runtimes, key) {
+            return;
+        }
+        if matches!(key.code, KeyCode::Up | KeyCode::Down)
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.modifiers.contains(KeyModifiers::SHIFT)
+        {
+            let row_step: i16 = if key.code == KeyCode::Up { -1 } else { 1 };
+            for _ in 0..COPY_MODE_LINE_JUMP {
+                self.move_copy_cursor(terminal_runtimes, row_step, 0);
+            }
             return;
         }
         match key.code {
@@ -1474,6 +1486,30 @@ mod tests {
         app.handle_copy_mode_key(TerminalKey::new(KeyCode::Char('y'), KeyModifiers::empty()));
 
         assert_eq!(copy_mode_clipboard_text(&mut app), "alpha\nbeta n");
+    }
+
+    #[tokio::test]
+    async fn copy_mode_ctrl_shift_up_jumps_multiple_lines() {
+        let mut content = Vec::new();
+        for line in 0..20 {
+            content.extend_from_slice(format!("line{line}\r\n").as_bytes());
+        }
+        let (mut app, pane_id) = app_with_copy_scrollback(&content);
+        app.state.enter_copy_mode(&app.terminal_runtimes);
+
+        let absolute_cursor_row = |app: &App| {
+            copy_mode_viewport_top_row(app, pane_id)
+                + usize::from(app.state.copy_mode.as_ref().expect("copy mode").cursor_row)
+        };
+        let before = absolute_cursor_row(&app);
+        assert!(before >= COPY_MODE_LINE_JUMP, "need room above to jump up");
+
+        app.handle_copy_mode_key(TerminalKey::new(
+            KeyCode::Up,
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        ));
+
+        assert_eq!(before - absolute_cursor_row(&app), COPY_MODE_LINE_JUMP);
     }
 
     #[tokio::test]

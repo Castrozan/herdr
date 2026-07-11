@@ -1242,6 +1242,16 @@ mod tests {
             (b"\x7f", KeyCode::Backspace, KeyModifiers::empty()),
             (b"\x1b[A", KeyCode::Up, KeyModifiers::empty()),
             (b"\x1b[1;3A", KeyCode::Up, KeyModifiers::ALT),
+            (
+                b"\x1b[1;6A",
+                KeyCode::Up,
+                KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
+            ),
+            (
+                b"\x1b[1;6B",
+                KeyCode::Down,
+                KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
+            ),
             (b"\x1b\x7f", KeyCode::Backspace, KeyModifiers::ALT),
             (b"\x1b[127;3u", KeyCode::Backspace, KeyModifiers::ALT),
             (b"\x1b[57420;1u", KeyCode::Down, KeyModifiers::empty()),
