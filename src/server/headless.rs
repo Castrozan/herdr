@@ -205,6 +205,7 @@ pub struct HeadlessServer {
     next_client_id: u64,
     /// The client currently driving the shared pane runtime size, theme, and input keybindings.
     foreground_client_id: Option<u64>,
+    client_view_owner: Option<u64>,
     /// Server-owned keybindings, restored when foreground clients use server mode.
     server_keybindings: crate::config::LiveKeybindConfig,
     /// Full server config warning shown to clients that use server keybindings.
@@ -401,6 +402,7 @@ impl HeadlessServer {
             #[cfg(unix)]
             next_client_id: 1,
             foreground_client_id: None,
+            client_view_owner: None,
             server_keybindings,
             server_config_diagnostic,
             server_config_diagnostic_without_keybindings,
@@ -1202,6 +1204,87 @@ impl HeadlessServer {
         )
     }
 
+    fn store_client_view(&mut self, client_id: u64) {
+        if let Some(client) = self.clients.get_mut(&client_id) {
+            client.view = Some(self.app.state.snapshot_client_view());
+        }
+    }
+
+    fn focus_client_view(&mut self, client_id: u64) {
+        if self.client_view_owner == Some(client_id) {
+            return;
+        }
+        self.reconcile_client_views_with_workspaces();
+        if let Some(owner) = self.client_view_owner {
+            self.store_client_view(owner);
+        }
+        let Some(client) = self.clients.get_mut(&client_id) else {
+            return;
+        };
+        match &client.view {
+            Some(view) => self.app.state.restore_client_view(view),
+            None => client.view = Some(self.app.state.snapshot_client_view()),
+        }
+        self.client_view_owner = Some(client_id);
+    }
+
+    fn focus_client_view_for_input(&mut self, client_id: u64) {
+        if self
+            .clients
+            .get(&client_id)
+            .is_some_and(ClientConnection::is_full_app_client)
+        {
+            self.focus_client_view(client_id);
+        }
+    }
+
+    fn reconcile_client_views_with_workspaces(&mut self) {
+        let workspace_ids: std::collections::HashSet<String> = self
+            .app
+            .state
+            .workspaces
+            .iter()
+            .map(|workspace| workspace.id.clone())
+            .collect();
+        let default_workspace_id = self
+            .app
+            .state
+            .workspaces
+            .first()
+            .map(|workspace| workspace.id.clone());
+        for client in self.clients.values_mut() {
+            let Some(view) = client.view.as_mut() else {
+                continue;
+            };
+            if view
+                .selected_workspace_id
+                .as_ref()
+                .is_some_and(|workspace_id| !workspace_ids.contains(workspace_id))
+            {
+                view.selected_workspace_id = default_workspace_id.clone();
+            }
+            if view
+                .active_workspace_id
+                .as_ref()
+                .is_some_and(|workspace_id| !workspace_ids.contains(workspace_id))
+            {
+                view.active_workspace_id = view
+                    .selected_workspace_id
+                    .clone()
+                    .or_else(|| default_workspace_id.clone());
+            }
+            if view.active_workspace_id.is_none() && default_workspace_id.is_some() {
+                view.active_workspace_id = default_workspace_id.clone();
+                if view.selected_workspace_id.is_none() {
+                    view.selected_workspace_id = default_workspace_id.clone();
+                }
+                if matches!(view.mode, app::Mode::Navigate | app::Mode::Onboarding) {
+                    view.mode = app::Mode::Terminal;
+                }
+            }
+        }
+    }
+
     fn promote_client_to_foreground(&mut self, client_id: u64) -> bool {
         let stamp = self.allocate_activity_stamp();
         let Some(client) = self.clients.get_mut(&client_id) else {
@@ -1219,6 +1302,9 @@ impl HeadlessServer {
         let next_foreground = latest_app_client(&self.clients);
         let changed = next_foreground != self.foreground_client_id;
         self.foreground_client_id = next_foreground;
+        if let Some(client_id) = next_foreground {
+            self.focus_client_view(client_id);
+        }
         self.sync_foreground_client_state();
         changed
     }
@@ -1238,6 +1324,9 @@ impl HeadlessServer {
         let was_foreground = self.foreground_client_id == Some(client_id);
         self.send_client_graphics_cleanup(client_id);
         let removed = self.clients.remove(&client_id);
+        if self.client_view_owner == Some(client_id) {
+            self.client_view_owner = None;
+        }
         if let Some(removed) = removed {
             crate::server::clipboard_image::remove_files(removed.staged_clipboard_files);
             if let ClientConnectionMode::TerminalAttach { terminal_id } = removed.mode {
@@ -1437,6 +1526,7 @@ impl HeadlessServer {
             return true;
         }
 
+        self.focus_client_view_for_input(client_id);
         let foreground_changed = self.promote_client_to_foreground(client_id);
         if foreground_changed {
             self.resize_shared_runtime_to_effective_size_before_input();
@@ -2419,6 +2509,7 @@ impl HeadlessServer {
             }
         }
         self.update_client_outer_focus_from_events(client_id, &events);
+        self.focus_client_view_for_input(client_id);
         let interaction = events_include_interaction(&events);
         let foreground_changed = if interaction {
             self.promote_client_to_foreground(client_id)
@@ -2520,6 +2611,7 @@ impl HeadlessServer {
                 );
                 if !direct_attach_requested {
                     self.foreground_client_id = Some(client_id);
+                    self.focus_client_view(client_id);
                 }
                 if first_app_client {
                     self.app.mark_git_status_refresh_due(Instant::now());
@@ -3120,10 +3212,6 @@ impl HeadlessServer {
             }};
         }
 
-        if !self.retained_pty_update_allowed_by_app_state() {
-            retained_fallback!("unsafe_app_state");
-        }
-
         let render_targets = render_targets(&self.clients, self.foreground_client_id);
         let [(client_id, (cols, rows), cell_size, _is_foreground, mode)] =
             render_targets.as_slice()
@@ -3132,6 +3220,10 @@ impl HeadlessServer {
         };
         if !matches!(mode, ClientConnectionMode::App) {
             retained_fallback!("not_app_client");
+        }
+        self.focus_client_view(*client_id);
+        if !self.retained_pty_update_allowed_by_app_state() {
+            retained_fallback!("unsafe_app_state");
         }
         let Some(client) = self.clients.get(client_id) else {
             retained_fallback!("client_missing");
@@ -3343,6 +3435,9 @@ impl HeadlessServer {
         for (client_id, (cols, rows), cell_size, is_foreground, mode) in render_targets {
             let area = Rect::new(0, 0, cols, rows);
             let is_app_client = matches!(mode, ClientConnectionMode::App);
+            if is_app_client {
+                self.focus_client_view(client_id);
+            }
             let mut frame = match mode {
                 ClientConnectionMode::App => {
                     let render_started = crate::render_prof::timer();
@@ -4153,6 +4248,8 @@ mod tests {
     use crate::app::AppState;
     use crate::protocol::CursorState;
 
+    mod client_view;
+
     fn test_headless_server() -> HeadlessServer {
         test_headless_server_with_event_hub(api::EventHub::default())
     }
@@ -4203,6 +4300,7 @@ mod tests {
             #[cfg(unix)]
             next_client_id: 1,
             foreground_client_id: None,
+            client_view_owner: None,
             server_keybindings,
             server_config_diagnostic: None,
             server_config_diagnostic_without_keybindings: None,
