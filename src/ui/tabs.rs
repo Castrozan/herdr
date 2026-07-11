@@ -6,7 +6,7 @@ use ratatui::{
 };
 
 use super::text::display_width_u16;
-use super::widgets::panel_contrast_fg;
+use super::widgets::on_accent_fg;
 use crate::app::AppState;
 
 const MIN_TAB_WIDTH: u16 = 8;
@@ -322,7 +322,9 @@ pub(super) fn render_tab_bar(app: &AppState, frame: &mut Frame, area: Rect) {
         }
         let active = idx == ws.active_tab;
         let style = if active {
-            let base = Style::default().fg(panel_contrast_fg(p)).bg(p.accent);
+            let base = Style::default()
+                .fg(on_accent_fg(p, app.host_terminal_theme))
+                .bg(p.accent);
             if tab.is_auto_named() {
                 base
             } else {
@@ -461,6 +463,32 @@ mod tests {
         assert_eq!(style.bg, Some(app.palette.accent));
         assert!(!style.add_modifier.contains(Modifier::DIM));
         assert!(!style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn active_tab_fg_follows_theme_background() {
+        use crate::app::state::Palette;
+        use crate::terminal_theme::{RgbColor, TerminalTheme};
+
+        let concrete = Palette::catppuccin();
+        assert_eq!(
+            on_accent_fg(&concrete, TerminalTheme::default()),
+            concrete.panel_bg
+        );
+
+        let terminal = Palette::terminal();
+        let detected = TerminalTheme {
+            foreground: None,
+            background: Some(RgbColor { r: 20, g: 22, b: 30 }),
+        };
+        assert_eq!(
+            on_accent_fg(&terminal, detected),
+            ratatui::style::Color::Rgb(20, 22, 30)
+        );
+        assert_eq!(
+            on_accent_fg(&terminal, TerminalTheme::default()),
+            terminal.surface_dim
+        );
     }
 
     #[test]

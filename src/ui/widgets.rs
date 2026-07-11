@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::app::state::Palette;
+use crate::terminal_theme::TerminalTheme;
 
 pub(super) fn render_panel_shell(
     frame: &mut Frame,
@@ -32,6 +33,16 @@ pub(super) fn render_panel_shell(
 pub(super) fn panel_contrast_fg(p: &Palette) -> Color {
     match p.panel_bg {
         Color::Reset => p.surface_dim,
+        color => color,
+    }
+}
+
+pub(super) fn on_accent_fg(p: &Palette, host_theme: TerminalTheme) -> Color {
+    match p.panel_bg {
+        Color::Reset => host_theme
+            .background
+            .map(|c| Color::Rgb(c.r, c.g, c.b))
+            .unwrap_or(p.surface_dim),
         color => color,
     }
 }
