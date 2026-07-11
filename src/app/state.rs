@@ -721,12 +721,14 @@ pub(crate) fn text_matches_query(query: &str, text: &str) -> bool {
 
 /// Computed view geometry — derived from AppState + terminal size.
 /// Updated before each render, consumed by render and mouse handling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ViewLayout {
+    #[default]
     Desktop,
     Mobile,
 }
 
+#[derive(Clone, Default)]
 pub struct ViewState {
     pub layout: ViewLayout,
     pub sidebar_rect: Rect,
@@ -1049,6 +1051,7 @@ pub struct SettingsState {
     pub original_theme: Option<String>,
 }
 
+#[derive(Clone)]
 pub(crate) enum DragTarget {
     WorkspaceReorder {
         source_ws_idx: usize,
@@ -1089,16 +1092,19 @@ pub(crate) enum DragTarget {
 }
 
 /// Active mouse drag on a split border or sidebar divider.
+#[derive(Clone)]
 pub(crate) struct DragState {
     pub target: DragTarget,
 }
 
+#[derive(Clone)]
 pub(crate) struct WorkspacePressState {
     pub ws_idx: usize,
     pub start_col: u16,
     pub start_row: u16,
 }
 
+#[derive(Clone)]
 pub(crate) struct TabPressState {
     pub ws_idx: usize,
     pub tab_idx: usize,
@@ -1131,6 +1137,7 @@ pub enum ContextMenuKind {
 }
 
 /// Right-click context menu state.
+#[derive(Clone)]
 pub struct ContextMenuState {
     pub kind: ContextMenuKind,
     pub x: u16,
@@ -1278,6 +1285,7 @@ pub struct CopyFeedback {
     pub message: String,
 }
 
+#[derive(Clone)]
 pub struct ReleaseNotesState {
     pub version: String,
     pub body: String,
@@ -1285,6 +1293,7 @@ pub struct ReleaseNotesState {
     pub preview: bool,
 }
 
+#[derive(Clone)]
 pub struct ProductAnnouncementState {
     pub version: String,
     pub id: String,
@@ -1294,6 +1303,7 @@ pub struct ProductAnnouncementState {
     pub preview: bool,
 }
 
+#[derive(Clone)]
 pub struct KeybindHelpState {
     pub scroll: u16,
 }
