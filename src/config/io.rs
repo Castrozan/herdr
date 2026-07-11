@@ -647,6 +647,78 @@ resume_agents_on_restore = true
     }
 
     #[test]
+    fn load_live_config_tolerates_unknown_copy_mode_command() {
+        use crate::config::CopyModeCommand;
+        use crate::input::TerminalKey;
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        let loaded = load_live_config_from_str(
+            r#"
+[keys]
+next_tab = "prefix+t"
+
+[[keys.copy_mode_command]]
+key = "h"
+command = "warp-drive"
+
+[[keys.copy_mode_command]]
+key = "x"
+command = "cursor-down"
+"#,
+        )
+        .unwrap();
+
+        assert!(
+            !loaded
+                .invalid_sections
+                .iter()
+                .any(|section| section == "keys"),
+            "keys section must not be wiped: {:?}",
+            loaded.invalid_sections
+        );
+
+        let keybinds = loaded.config.keybinds();
+        assert!(
+            keybinds
+                .next_tab
+                .bindings
+                .iter()
+                .any(|binding| binding.label == "prefix+t"),
+            "user next_tab override must survive"
+        );
+
+        let diagnostics = loaded.config.collect_diagnostics();
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diag| diag.contains("unknown copy-mode command 'warp-drive'")),
+            "expected per-entry unknown-command diagnostic: {diagnostics:?}"
+        );
+
+        assert!(
+            keybinds.copy_mode_commands.iter().any(|binding| {
+                binding.command == CopyModeCommand::CursorDown
+                    && binding.bindings.matches_direct_key(TerminalKey::new(
+                        KeyCode::Char('x'),
+                        KeyModifiers::empty(),
+                    ))
+            }),
+            "valid copy-mode entry must still compile"
+        );
+
+        assert!(
+            keybinds.copy_mode_commands.iter().any(|binding| {
+                binding.command == CopyModeCommand::CursorDown
+                    && binding.bindings.matches_direct_key(TerminalKey::new(
+                        KeyCode::Char('j'),
+                        KeyModifiers::empty(),
+                    ))
+            }),
+            "untouched copy-mode default must remain intact"
+        );
+    }
+
+    #[test]
     fn load_live_config_warns_about_unknown_top_level_sections() {
         let loaded = load_live_config_from_str(
             r#"
