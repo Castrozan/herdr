@@ -601,6 +601,7 @@ impl App {
             next_agent_state_change_seq: 0,
             mouse_capture: config.ui.mouse_capture,
             copy_on_select: config.ui.copy_on_select,
+            navigator_collapse_workspaces: config.ui.navigator_collapse_workspaces,
             right_click_passthrough_modifiers: config.ui.right_click_passthrough_modifiers(),
             right_click_passthrough: None,
             redraw_on_focus_gained: config.ui.redraw_on_focus_gained,
@@ -1360,6 +1361,7 @@ impl App {
                     .clamp(self.state.sidebar_min_width, self.state.sidebar_max_width);
                 self.state.mouse_capture = config.ui.mouse_capture;
                 self.state.copy_on_select = config.ui.copy_on_select;
+                self.state.navigator_collapse_workspaces = config.ui.navigator_collapse_workspaces;
                 if !self.state.copy_on_select {
                     if self.state.mode == Mode::Copy {
                         self.state.stop_selection_autoscroll_state();
