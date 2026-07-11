@@ -227,6 +227,22 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # type = "pane"
 # command = "lazygit"
 
+# Copy-mode keys are user-bindable, like tmux's copy-mode-vi table.
+# Each entry maps a modal key to a copy-mode command. Unset keys fall back to the
+# built-in vi-style keytable, so list only the keys you want to override or add.
+# Keys are matched directly while copy mode is active; do not use prefix+ here.
+# count repeats a repeatable command (cursor, scroll, word, paragraph, search-again).
+# Commands: cursor-left, cursor-down, cursor-up, cursor-right, start-of-line,
+# end-of-line, back-to-indentation, history-top, history-bottom, page-up, page-down,
+# halfpage-up, halfpage-down, next-word, previous-word, next-word-end,
+# previous-paragraph, next-paragraph, begin-selection, select-line, copy-selection,
+# cancel, clear-selection-or-cancel, search-forward, search-backward, search-again,
+# search-reverse.
+# [[keys.copy_mode_command]]
+# key = "ctrl+shift+up"
+# command = "cursor-up"
+# count = 5
+
 # Legacy indexed shortcut config is still parsed for compatibility.
 # Prefer switch_tab, switch_workspace, and focus_agent for new configs.
 # [keys.indexed]

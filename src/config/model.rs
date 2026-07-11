@@ -4,8 +4,8 @@ use crossterm::event::KeyModifiers;
 use serde::{de, Deserialize, Deserializer, Serialize};
 
 use super::{
-    ActionKeybinds, BindingConfig, CommandKeybindConfig, IndexedKeybind, Keybinds, SoundConfig,
-    ThemeConfig, DEFAULT_MOBILE_WIDTH_THRESHOLD, DEFAULT_MOUSE_SCROLL_LINES,
+    ActionKeybinds, BindingConfig, CommandKeybindConfig, CopyModeKeybindConfig, IndexedKeybind,
+    Keybinds, SoundConfig, ThemeConfig, DEFAULT_MOBILE_WIDTH_THRESHOLD, DEFAULT_MOUSE_SCROLL_LINES,
     DEFAULT_SCROLLBACK_LIMIT_BYTES,
 };
 
@@ -421,6 +421,9 @@ pub struct KeysConfig {
     /// Prefix-mode custom command bindings.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub command: Vec<CommandKeybindConfig>,
+    /// Copy-mode key bindings that override or extend the built-in copy-mode keytable.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub copy_mode_command: Vec<CopyModeKeybindConfig>,
     #[serde(skip_serializing)]
     pub(crate) user_fields: BTreeSet<&'static str>,
 }
@@ -538,6 +541,8 @@ pub(crate) struct KeysConfigOverlay {
     indexed: Option<IndexedKeysConfig>,
     #[serde(skip_serializing)]
     command: Option<Vec<CommandKeybindConfig>>,
+    #[serde(skip_serializing)]
+    copy_mode_command: Option<Vec<CopyModeKeybindConfig>>,
 }
 
 impl<'de> Deserialize<'de> for KeysConfig {
@@ -612,6 +617,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(toggle_sidebar);
         apply_field!(indexed);
         apply_field!(command);
+        apply_field!(copy_mode_command);
 
         Ok(keys)
     }
@@ -969,6 +975,7 @@ impl Default for KeysConfig {
             toggle_sidebar: BindingConfig::one("prefix+b"),
             indexed: IndexedKeysConfig::default(),
             command: Vec::new(),
+            copy_mode_command: Vec::new(),
             user_fields: BTreeSet::new(),
         }
     }

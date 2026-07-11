@@ -1,5 +1,6 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 
+mod copy_mode_command;
 mod io;
 mod keybinds;
 mod model;
@@ -7,6 +8,7 @@ mod sound;
 mod theme;
 
 pub use self::{
+    copy_mode_command::{CopyModeCommand, CopyModeCommandSpec},
     io::{
         config_diagnostic_summary, config_dir, config_path, load_live_config,
         remove_keybinding_config_sections, remove_section_key, state_dir, upsert_section_bool,
@@ -14,8 +16,8 @@ pub use self::{
     },
     keybinds::{
         format_key_combo, normalize_key_combo, terminal_key_matches_combo, ActionKeybinds,
-        BindingConfig, CommandKeybindConfig, CustomCommandAction, CustomCommandKeybind,
-        IndexedKeybind, Keybinds, LiveKeybindConfig,
+        BindingConfig, CommandKeybindConfig, CompiledCopyModeBinding, CopyModeKeybindConfig,
+        CustomCommandAction, CustomCommandKeybind, IndexedKeybind, Keybinds, LiveKeybindConfig,
     },
     model::{
         validated_sidebar_bounds, AgentPanelSortConfig, Config, ConfigReloadReport,
