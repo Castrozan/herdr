@@ -263,6 +263,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Set false to disable mouse text selection and copying.
 # copy_on_select = true
 
+# Expand every workspace to its panes when the navigator (goto) opens.
+# Set true to restore the old cascade; false opens collapsed to the workspace level.
+# navigator_expand_workspaces = false
+
 # Host cursor policy: "auto", "native", or "drawn".
 # "auto" draws Herdr's own cursor on native Windows builds and WSL to avoid ConPTY cursor flicker, and uses the native terminal cursor elsewhere.
 # "native" always uses the outer terminal cursor. "drawn" always draws Herdr's cursor as terminal cell content.
