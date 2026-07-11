@@ -1042,7 +1042,7 @@ mod tests {
 
         assert_eq!(auto_style.fg, Some(app.palette.overlay0));
         assert!(auto_style.add_modifier.contains(Modifier::DIM));
-        assert_eq!(custom_style.fg, Some(app.palette.panel_bg));
+        assert_eq!(custom_style.fg, Some(Color::Black));
         assert!(custom_style.add_modifier.contains(Modifier::BOLD));
     }
 
@@ -1054,6 +1054,7 @@ mod tests {
         ws.switch_tab(custom_tab);
 
         app.palette.panel_bg = Color::Reset;
+        app.palette.accent = Color::Blue;
         app.workspaces = vec![ws];
         app.active = Some(0);
         app.selected = 0;

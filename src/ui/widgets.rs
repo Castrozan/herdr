@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::app::state::Palette;
+use crate::terminal_theme::{HostAppearance, RgbColor};
 
 pub(super) fn render_panel_shell(
     frame: &mut Frame,
@@ -33,6 +34,16 @@ pub(super) fn panel_contrast_fg(p: &Palette) -> Color {
     match p.panel_bg {
         Color::Reset => p.surface_dim,
         color => color,
+    }
+}
+
+pub(super) fn contrast_fg_on(bg: Color, p: &Palette) -> Color {
+    let Color::Rgb(r, g, b) = bg else {
+        return panel_contrast_fg(p);
+    };
+    match (RgbColor { r, g, b }).inferred_appearance() {
+        HostAppearance::Light => Color::Black,
+        HostAppearance::Dark => Color::White,
     }
 }
 
