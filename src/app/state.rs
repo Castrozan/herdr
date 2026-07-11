@@ -766,6 +766,7 @@ pub enum Mode {
     GlobalMenu,
     KeybindHelp,
     Navigator,
+    SessionPicker,
 }
 
 impl Mode {
@@ -791,6 +792,7 @@ impl Mode {
                 | Mode::ContextMenu
                 | Mode::GlobalMenu
                 | Mode::KeybindHelp
+                | Mode::SessionPicker
         )
     }
 }
@@ -1001,6 +1003,12 @@ impl MenuListState {
             self.highlighted = idx;
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionPickerState {
+    pub names: Vec<String>,
+    pub list: MenuListState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1331,6 +1339,8 @@ pub struct AppState {
     /// Set when the current client should detach from the persistent session.
     /// The server's event loop checks this and handles client detach.
     pub detach_requested: bool,
+    pub switch_session_requested: Option<String>,
+    pub session_picker: Option<SessionPickerState>,
     pub request_new_workspace: bool,
     pub request_new_tab: bool,
     pub request_new_linked_worktree: Option<usize>,
@@ -1687,6 +1697,8 @@ impl AppState {
             should_quit: false,
             detach_exits: false,
             detach_requested: false,
+            switch_session_requested: None,
+            session_picker: None,
             request_new_workspace: false,
             request_new_tab: false,
             request_new_linked_worktree: None,

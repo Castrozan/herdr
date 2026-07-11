@@ -256,6 +256,73 @@ pub(super) fn render_global_launcher_menu(app: &AppState, frame: &mut Frame) {
     }
 }
 
+pub(super) fn render_session_picker(app: &AppState, frame: &mut Frame) {
+    let Some(picker) = &app.session_picker else {
+        return;
+    };
+
+    let screen = frame.area();
+    let title = "switch session";
+    let content_width = picker
+        .names
+        .iter()
+        .map(|name| name.chars().count())
+        .chain(std::iter::once(title.chars().count()))
+        .max()
+        .unwrap_or_else(|| title.chars().count()) as u16;
+    let menu_w = content_width.saturating_add(4).min(screen.width.max(1));
+    let rows = picker.names.len().max(1) as u16 + 1;
+    let menu_h = rows.saturating_add(2).min(screen.height.max(1));
+    let x = screen.x + screen.width.saturating_sub(menu_w) / 2;
+    let y = screen.y + screen.height.saturating_sub(menu_h) / 2;
+    let rect = Rect::new(x, y, menu_w, menu_h);
+
+    let Some(inner) = render_panel_shell(frame, rect, app.palette.accent, app.palette.panel_bg)
+    else {
+        return;
+    };
+
+    let title_style = Style::default()
+        .fg(app.palette.accent)
+        .add_modifier(Modifier::BOLD);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(format!(" {title} "), title_style)))
+            .alignment(Alignment::Left),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+
+    if picker.names.is_empty() {
+        let empty_style = Style::default().fg(app.palette.overlay0);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(" no other sessions ", empty_style)))
+                .alignment(Alignment::Left),
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
+        );
+        return;
+    }
+
+    for (idx, name) in picker.names.iter().enumerate() {
+        let row_y = inner.y + 1 + idx as u16;
+        if row_y >= inner.y + inner.height {
+            break;
+        }
+        let selected = idx == picker.list.highlighted;
+        let item_style = if selected {
+            Style::default()
+                .fg(panel_contrast_fg(&app.palette))
+                .bg(app.palette.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(app.palette.text)
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(format!(" {name} "), item_style)))
+                .alignment(Alignment::Left),
+            Rect::new(inner.x, row_y, inner.width, 1),
+        );
+    }
+}
+
 pub(super) fn render_resize_overlay(app: &AppState, frame: &mut Frame, area: Rect) {
     let key = Style::default()
         .fg(app.palette.accent)

@@ -235,6 +235,7 @@ pub enum ClientError {
     HandshakeRejected { version: u32, error: String },
     /// Server shut down.
     ServerShutdown { reason: Option<String> },
+    SwitchSession { name: String },
     /// Lost connection to the server.
     ConnectionLost(io::Error),
     /// Protocol error (framing, deserialization).
@@ -281,6 +282,9 @@ impl std::fmt::Display for ClientError {
                     }
                 }
                 Ok(())
+            }
+            ClientError::SwitchSession { name } => {
+                write!(f, "switching to session {name}")
             }
             ClientError::ConnectionLost(err) => {
                 if let Ok(reattach_command) = std::env::var(crate::remote::REATTACH_COMMAND_ENV_VAR)
@@ -1240,6 +1244,25 @@ fn run_client_with_mode(
     drop(terminal_guard);
 
     if let Err(err) = result {
+        #[cfg(unix)]
+        if let ClientError::SwitchSession { name } = &err {
+            use std::os::unix::process::CommandExt;
+            let name = name.clone();
+            rt.shutdown_timeout(Duration::from_millis(100));
+            crate::logging::shutdown("client");
+            let exe =
+                std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("herdr"));
+            let mut command = std::process::Command::new(exe);
+            if name == crate::session::DEFAULT_SESSION_NAME {
+                command.env_remove(crate::session::SESSION_ENV_VAR);
+            } else {
+                command.arg("--session").arg(&name);
+            }
+            let exec_err = command.exec();
+            eprintln!("herdr: failed to switch to session {name}: {exec_err}");
+            std::process::exit(1);
+        }
+
         eprintln!("herdr: {err}");
         rt.shutdown_timeout(Duration::from_millis(100));
         crate::logging::shutdown("client");
@@ -1544,6 +1567,9 @@ async fn run_client_loop(
                 }
                 ServerMessage::ServerShutdown { reason } => {
                     return Err(ClientError::ServerShutdown { reason });
+                }
+                ServerMessage::SwitchSession { name } => {
+                    return Err(ClientError::SwitchSession { name });
                 }
                 ServerMessage::Notify {
                     kind,

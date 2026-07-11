@@ -664,6 +664,10 @@ pub enum ServerMessage {
         /// Whether the ASCII input source should be active.
         active: bool,
     },
+
+    SwitchSession {
+        name: String,
+    },
 }
 
 // ---------------------------------------------------------------------------

@@ -2437,7 +2437,18 @@ impl HeadlessServer {
             self.sync_foreground_client_state();
         }
 
-        if self.app.state.detach_requested {
+        if let Some(name) = self.app.state.switch_session_requested.take() {
+            info!(client_id, %name, "client session switch requested via keybind");
+
+            self.send_client_graphics_cleanup(client_id);
+            self.send_to_client(client_id, ServerMessage::SwitchSession { name });
+
+            if let Some(client) = self.clients.get_mut(&client_id) {
+                client.writer = None;
+            }
+
+            false
+        } else if self.app.state.detach_requested {
             self.app.state.detach_requested = false;
             info!(client_id, "client detach requested via keybind");
 

@@ -7,6 +7,7 @@ use crate::{
     app::{
         state::{
             AppState, ContextMenuKind, ContextMenuState, MenuListState, Mode, NavigatorStateFilter,
+            SessionPickerState,
         },
         App,
     },
@@ -152,6 +153,50 @@ pub(crate) fn handle_global_menu_key(state: &mut AppState, key: KeyEvent) {
             if let Some(action) = actions.get(state.global_menu.highlighted).copied() {
                 apply_global_menu_action(state, action);
             }
+        }
+        _ => {}
+    }
+}
+
+pub(super) fn open_session_picker(state: &mut AppState) {
+    let current = crate::session::active_name()
+        .unwrap_or_else(|| crate::session::DEFAULT_SESSION_NAME.to_string());
+    let names: Vec<String> = crate::session::list_sessions()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|info| info.name)
+        .filter(|name| name != &current)
+        .collect();
+    state.session_picker = Some(SessionPickerState {
+        names,
+        list: MenuListState::new(0),
+    });
+    state.mode = Mode::SessionPicker;
+}
+
+pub(crate) fn handle_session_picker_key(state: &mut AppState, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => leave_modal(state),
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(picker) = state.session_picker.as_mut() {
+                picker.list.move_prev();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(picker) = state.session_picker.as_mut() {
+                let count = picker.names.len();
+                picker.list.move_next(count);
+            }
+        }
+        KeyCode::Enter => {
+            let selected = state
+                .session_picker
+                .as_ref()
+                .and_then(|picker| picker.names.get(picker.list.highlighted).cloned());
+            if let Some(name) = selected {
+                state.switch_session_requested = Some(name);
+            }
+            leave_modal(state);
         }
         _ => {}
     }
@@ -1326,6 +1371,52 @@ mod tests {
             checkout_path: format!("/repo/worktree-{ws_idx}").into(),
             is_linked_worktree: ws_idx != 0,
         });
+    }
+
+    fn session_picker_state(names: &[&str], highlighted: usize) -> AppState {
+        let mut state = state_with_workspaces(&["test"]);
+        state.session_picker = Some(crate::app::state::SessionPickerState {
+            names: names.iter().map(|name| name.to_string()).collect(),
+            list: crate::app::state::MenuListState::new(highlighted),
+        });
+        state.mode = Mode::SessionPicker;
+        state
+    }
+
+    #[test]
+    fn session_picker_enter_requests_highlighted_session() {
+        let mut state = session_picker_state(&["workspace-2", "workspace-5"], 0);
+
+        handle_session_picker_key(&mut state, KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+        handle_session_picker_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+        );
+
+        assert_eq!(state.switch_session_requested.as_deref(), Some("workspace-5"));
+        assert_ne!(state.mode, Mode::SessionPicker);
+    }
+
+    #[test]
+    fn session_picker_esc_cancels_without_request() {
+        let mut state = session_picker_state(&["workspace-2"], 0);
+
+        handle_session_picker_key(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+        assert!(state.switch_session_requested.is_none());
+        assert_ne!(state.mode, Mode::SessionPicker);
+    }
+
+    #[test]
+    fn session_picker_enter_on_empty_list_requests_nothing() {
+        let mut state = session_picker_state(&[], 0);
+
+        handle_session_picker_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+        );
+
+        assert!(state.switch_session_requested.is_none());
     }
 
     #[test]

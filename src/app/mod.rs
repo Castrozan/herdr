@@ -512,6 +512,8 @@ impl App {
             should_quit: false,
             detach_exits: no_session,
             detach_requested: false,
+            switch_session_requested: None,
+            session_picker: None,
             request_new_workspace: false,
             request_new_tab: false,
             request_new_linked_worktree: None,
@@ -1686,6 +1688,9 @@ impl App {
             }
             Mode::Navigator => {
                 input::handle_navigator_key(&mut self.state, &self.terminal_runtimes, key_event);
+            }
+            Mode::SessionPicker => {
+                input::handle_session_picker_key(&mut self.state, key_event);
             }
             Mode::Terminal => {
                 // Should not be called in terminal mode.

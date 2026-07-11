@@ -311,6 +311,7 @@ pub struct Keybinds {
     pub workspace_picker: ActionKeybinds,
     pub goto: ActionKeybinds,
     pub detach: ActionKeybinds,
+    pub switch_session: ActionKeybinds,
     pub reload_config: ActionKeybinds,
     pub open_notification_target: ActionKeybinds,
     pub previous_workspace: ActionKeybinds,
@@ -473,6 +474,7 @@ impl Config {
             workspace_picker: empty_action!(),
             goto: empty_action!(),
             detach: empty_action!(),
+            switch_session: empty_action!(),
             reload_config: empty_action!(),
             open_notification_target: empty_action!(),
             previous_workspace: empty_action!(),
@@ -595,6 +597,7 @@ impl Config {
             apply_action!(keybinds.workspace_picker, workspace_picker, source);
             apply_action!(keybinds.goto, goto, source);
             apply_action!(keybinds.detach, detach, source);
+            apply_action!(keybinds.switch_session, switch_session, source);
             apply_action!(keybinds.reload_config, reload_config, source);
             apply_action!(
                 keybinds.open_notification_target,

@@ -414,6 +414,9 @@ impl App {
                 super::modal::request_detach(&mut self.state);
                 leave_navigate_mode(&mut self.state);
             }
+            NavigateAction::SwitchSession => {
+                super::modal::open_session_picker(&mut self.state);
+            }
             NavigateAction::OpenNavigator => {
                 self.state.open_navigator_from(&self.terminal_runtimes)
             }
@@ -1321,6 +1324,7 @@ pub(crate) enum NavigateAction {
     ReloadConfig,
     OpenNotificationTarget,
     Detach,
+    SwitchSession,
     OpenNavigator,
 }
 
@@ -1455,6 +1459,7 @@ fn non_indexed_action_for_key(
             NavigateAction::OpenNotificationTarget,
         ),
         (&kb.detach, NavigateAction::Detach),
+        (&kb.switch_session, NavigateAction::SwitchSession),
         (&kb.goto, NavigateAction::OpenNavigator),
     ] {
         if action_matches(bindings, key, dispatch) {
@@ -1710,6 +1715,9 @@ pub(super) fn execute_navigate_action_in_context(
         NavigateAction::Detach => {
             super::modal::request_detach(state);
             leave_navigate_mode(state);
+        }
+        NavigateAction::SwitchSession => {
+            super::modal::open_session_picker(state);
         }
         NavigateAction::OpenNavigator => state.open_navigator_from(terminal_runtimes),
     }
