@@ -56,6 +56,7 @@ pub(crate) struct ClientConnection {
     pub(crate) host_mouse_capture_active: Option<bool>,
     /// Temporary files staged from this client's local clipboard image pastes.
     pub(crate) staged_clipboard_files: Vec<PathBuf>,
+    pub(crate) view: Option<crate::app::client_view::ClientView>,
     /// Channels for sending framed ServerMessage data to the client writer thread.
     pub(crate) writer: Option<ClientWriter>,
 }
@@ -117,6 +118,7 @@ impl ClientConnection {
             render_pending: false,
             host_mouse_capture_active: None,
             staged_clipboard_files: Vec::new(),
+            view: None,
             writer,
         }
     }
