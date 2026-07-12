@@ -1408,6 +1408,7 @@ pub struct AppState {
     /// captures mouse while the focused pane app requests mouse reporting.
     pub mouse_capture: bool,
     pub copy_on_select: bool,
+    pub navigator_collapse_workspaces: bool,
     pub right_click_passthrough_modifiers: Option<KeyModifiers>,
     pub right_click_passthrough: Option<RightClickPassthroughGesture>,
     pub redraw_on_focus_gained: bool,
@@ -1767,6 +1768,7 @@ impl AppState {
             next_agent_state_change_seq: 0,
             mouse_capture: true,
             copy_on_select: true,
+            navigator_collapse_workspaces: false,
             right_click_passthrough_modifiers: None,
             right_click_passthrough: None,
             redraw_on_focus_gained: true,

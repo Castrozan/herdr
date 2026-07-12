@@ -355,8 +355,10 @@ impl AppState {
         self.navigator.scroll = 0;
         self.navigator.expanded_workspaces.clear();
 
-        for ws in &self.workspaces {
-            self.navigator.expanded_workspaces.insert(ws.id.clone());
+        if !self.navigator_collapse_workspaces {
+            for ws in &self.workspaces {
+                self.navigator.expanded_workspaces.insert(ws.id.clone());
+            }
         }
 
         self.mode = Mode::Navigator;
@@ -3419,7 +3421,7 @@ mod tests {
     }
 
     #[test]
-    fn opening_navigator_selects_current_pane_and_expands_attention_workspaces() {
+    fn opening_navigator_selects_current_pane_and_expands_workspaces_by_default() {
         let mut state = app_with_workspaces(&["one", "two"]);
         let blocked = state.workspaces[1].tabs[0].root_pane;
         let blocked_terminal_id = state.workspaces[1].terminal_id(blocked).cloned().unwrap();
@@ -3441,6 +3443,49 @@ mod tests {
             .navigator
             .expanded_workspaces
             .contains(&state.workspaces[1].id));
+    }
+
+    #[test]
+    fn navigator_collapse_workspaces_option_opens_collapsed_rows() {
+        let mut state = app_with_workspaces(&["one", "two"]);
+        state.navigator_collapse_workspaces = true;
+        state.open_navigator();
+
+        assert!(state.navigator.expanded_workspaces.is_empty());
+        let rows = state.navigator_rows();
+        assert!(rows.iter().all(|row| row.is_workspace));
+        assert!(!rows.iter().any(|row| matches!(
+            row.target,
+            crate::app::state::NavigatorTarget::Pane { .. }
+                | crate::app::state::NavigatorTarget::Tab { .. }
+        )));
+        let selected = rows[state.navigator.selected].clone();
+        assert!(selected.is_workspace);
+        assert!(selected.is_current);
+    }
+
+    #[test]
+    fn navigator_query_expands_collapsed_workspaces_to_matching_panes() {
+        let mut state = app_with_workspaces(&["one"]);
+        let root = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0].terminal_id(root).cloned().unwrap();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_manual_label("weekly review".into());
+
+        state.navigator_collapse_workspaces = true;
+        state.open_navigator();
+        assert!(state.navigator.expanded_workspaces.is_empty());
+        assert!(state.navigator_rows().iter().all(|row| row.is_workspace));
+
+        state.navigator.query = "weekly".into();
+        let rows = state.navigator_rows();
+        assert!(rows.iter().any(|row| matches!(
+            row.target,
+            crate::app::state::NavigatorTarget::Pane { .. }
+        ) && row.label.contains("weekly")));
     }
 
     #[test]
