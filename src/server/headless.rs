@@ -1937,7 +1937,9 @@ impl HeadlessServer {
                     );
                 }
 
-                true
+                prev_state != next_state
+                    || prev_agent_label != next_agent_label
+                    || self.app.state.toast != toast_before
             }
             AppEvent::HookStateReported {
                 pane_id,
@@ -8528,6 +8530,73 @@ next_tab = ""
             }
             other => panic!("expected delayed system toast, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn stable_blocker_republish_does_not_force_full_render() {
+        let mut server = test_headless_server();
+        let workspace = crate::workspace::Workspace::test_new("active");
+        let pane_id = workspace.tabs[0].root_pane;
+        server.app.state.workspaces = vec![workspace];
+        server.app.state.ensure_test_terminals();
+        server.app.state.active = Some(0);
+        server.app.state.selected = 0;
+        server.app.state.mode = crate::app::Mode::Terminal;
+
+        let (client_tx, _client_control_rx, _client_rx) = test_client_writer();
+        server.clients.insert(
+            1,
+            ClientConnection::new(
+                (80, 24),
+                crate::kitty_graphics::HostCellSize::default(),
+                crate::terminal_theme::TerminalTheme::default(),
+                None,
+                1,
+                RenderEncoding::SemanticFrame,
+                Some(client_tx),
+            ),
+        );
+        server.foreground_client_id = Some(1);
+        server.sync_foreground_client_state();
+
+        let entered_blocked =
+            server.handle_internal_event_with_forwarding(AppEvent::StateChanged {
+                pane_id,
+                agent: Some(crate::detect::Agent::Pi),
+                state: crate::detect::AgentState::Blocked,
+                visible_blocker: true,
+                visible_working: false,
+                process_exited: false,
+                observed_at: Instant::now(),
+            });
+        assert!(
+            entered_blocked,
+            "entering the Blocked state must force a full render"
+        );
+        assert_eq!(
+            server.pane_effective_state(pane_id),
+            crate::detect::AgentState::Blocked
+        );
+
+        let republished_blocked =
+            server.handle_internal_event_with_forwarding(AppEvent::StateChanged {
+                pane_id,
+                agent: Some(crate::detect::Agent::Pi),
+                state: crate::detect::AgentState::Blocked,
+                visible_blocker: true,
+                visible_working: false,
+                process_exited: false,
+                observed_at: Instant::now(),
+            });
+        assert!(
+            !republished_blocked,
+            "a no-op stable blocker republish must not force a full render"
+        );
+        assert_eq!(
+            server.pane_effective_state(pane_id),
+            crate::detect::AgentState::Blocked,
+            "the blocker must stay displayed after a no-op republish"
+        );
     }
 
     #[test]
