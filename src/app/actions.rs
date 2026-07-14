@@ -1279,6 +1279,30 @@ impl AppState {
     }
 
     #[cfg(test)]
+    pub fn move_active_tab(&mut self, delta: isize) {
+        let Some(ws_idx) = self.active else {
+            return;
+        };
+        let Some(ws) = self.workspaces.get(ws_idx) else {
+            return;
+        };
+        let tab_count = ws.tabs.len();
+        if tab_count <= 1 {
+            return;
+        }
+        let source = ws.active_tab;
+        let target = source as isize + delta;
+        if target < 0 || target as usize >= tab_count {
+            return;
+        }
+        let target = target as usize;
+        let insert_index = if target > source { target + 1 } else { target };
+        if let Some(ws) = self.workspaces.get_mut(ws_idx) {
+            ws.move_tab(source, insert_index);
+        }
+    }
+
+    #[cfg(test)]
     pub fn next_agent(&mut self) {
         self.cycle_agent_entry(true);
     }

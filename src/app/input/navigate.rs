@@ -325,6 +325,14 @@ impl App {
                     leave_navigate_mode(&mut self.state);
                 }
             }
+            NavigateAction::MoveTabLeft => {
+                self.move_active_tab_via_api(-1);
+                leave_navigate_mode(&mut self.state);
+            }
+            NavigateAction::MoveTabRight => {
+                self.move_active_tab_via_api(1);
+                leave_navigate_mode(&mut self.state);
+            }
             NavigateAction::CloseTab => {
                 if !self.close_active_tab_via_api_requires_confirmation() {
                     leave_navigate_mode(&mut self.state);
@@ -493,6 +501,31 @@ impl App {
                 insert_index: insert_idx,
             },
         );
+    }
+
+    pub(crate) fn move_active_tab_via_api(&mut self, delta: isize) {
+        let Some(ws_idx) = self.state.active else {
+            return;
+        };
+        let Some(ws) = self.state.workspaces.get(ws_idx) else {
+            return;
+        };
+        let tab_count = ws.tabs.len();
+        if tab_count <= 1 {
+            return;
+        }
+        let source_tab_idx = ws.active_tab;
+        let target = source_tab_idx as isize + delta;
+        if target < 0 || target as usize >= tab_count {
+            return;
+        }
+        let target = target as usize;
+        let insert_index = if target > source_tab_idx {
+            target + 1
+        } else {
+            target
+        };
+        self.move_tab_via_api(ws_idx, source_tab_idx, insert_index);
     }
 
     pub(crate) fn focus_pane_internal_via_api(
@@ -1295,6 +1328,8 @@ pub(crate) enum NavigateAction {
     RenameTab,
     PreviousTab,
     NextTab,
+    MoveTabLeft,
+    MoveTabRight,
     CloseTab,
     RenamePane,
     FocusPaneLeft,
@@ -1428,6 +1463,8 @@ fn non_indexed_action_for_key(
         (&kb.rename_tab, NavigateAction::RenameTab),
         (&kb.previous_tab, NavigateAction::PreviousTab),
         (&kb.next_tab, NavigateAction::NextTab),
+        (&kb.move_tab_left, NavigateAction::MoveTabLeft),
+        (&kb.move_tab_right, NavigateAction::MoveTabRight),
         (&kb.close_tab, NavigateAction::CloseTab),
         (&kb.rename_pane, NavigateAction::RenamePane),
         (&kb.edit_scrollback, NavigateAction::EditScrollback),
@@ -1623,6 +1660,14 @@ pub(super) fn execute_navigate_action_in_context(
         }
         NavigateAction::NextTab => {
             state.next_tab();
+            leave_navigate_mode(state);
+        }
+        NavigateAction::MoveTabLeft => {
+            state.move_active_tab(-1);
+            leave_navigate_mode(state);
+        }
+        NavigateAction::MoveTabRight => {
+            state.move_active_tab(1);
             leave_navigate_mode(state);
         }
         NavigateAction::CloseTab => {
@@ -2908,6 +2953,93 @@ navigate_pane_down = "ctrl+j"
         assert_eq!(app.state.selected, 0);
         assert_eq!(app.state.mode, Mode::ConfirmClose);
         assert_eq!(app.state.workspaces.len(), 2);
+    }
+
+    #[test]
+    fn move_tab_right_action_reorders_active_tab_one_slot_right() {
+        let mut state = state_with_workspaces(&["main"]);
+        state.workspaces[0].test_add_tab(Some("b"));
+        state.workspaces[0].test_add_tab(Some("c"));
+        state.workspaces[0].switch_tab(1);
+        state.active = Some(0);
+        state.mode = Mode::Navigate;
+
+        let before: Vec<_> = state.workspaces[0].tabs.iter().map(|t| t.number).collect();
+        let moved = before[1];
+
+        execute_navigate_action(&mut state, NavigateAction::MoveTabRight);
+
+        let after: Vec<_> = state.workspaces[0].tabs.iter().map(|t| t.number).collect();
+        assert_eq!(after, vec![before[0], before[2], before[1]]);
+        let ws = &state.workspaces[0];
+        assert_eq!(ws.tabs[ws.active_tab].number, moved);
+    }
+
+    #[test]
+    fn move_tab_left_action_reorders_active_tab_one_slot_left() {
+        let mut state = state_with_workspaces(&["main"]);
+        state.workspaces[0].test_add_tab(Some("b"));
+        state.workspaces[0].test_add_tab(Some("c"));
+        state.workspaces[0].switch_tab(1);
+        state.active = Some(0);
+        state.mode = Mode::Navigate;
+
+        let before: Vec<_> = state.workspaces[0].tabs.iter().map(|t| t.number).collect();
+        let moved = before[1];
+
+        execute_navigate_action(&mut state, NavigateAction::MoveTabLeft);
+
+        let after: Vec<_> = state.workspaces[0].tabs.iter().map(|t| t.number).collect();
+        assert_eq!(after, vec![before[1], before[0], before[2]]);
+        let ws = &state.workspaces[0];
+        assert_eq!(ws.tabs[ws.active_tab].number, moved);
+    }
+
+    #[test]
+    fn move_tab_right_action_at_last_tab_is_noop() {
+        let mut state = state_with_workspaces(&["main"]);
+        state.workspaces[0].test_add_tab(Some("b"));
+        state.workspaces[0].switch_tab(1);
+        state.active = Some(0);
+        state.mode = Mode::Navigate;
+
+        let before: Vec<_> = state.workspaces[0].tabs.iter().map(|t| t.number).collect();
+
+        execute_navigate_action(&mut state, NavigateAction::MoveTabRight);
+
+        let after: Vec<_> = state.workspaces[0].tabs.iter().map(|t| t.number).collect();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn move_tab_left_action_at_first_tab_is_noop() {
+        let mut state = state_with_workspaces(&["main"]);
+        state.workspaces[0].test_add_tab(Some("b"));
+        state.workspaces[0].switch_tab(0);
+        state.active = Some(0);
+        state.mode = Mode::Navigate;
+
+        let before: Vec<_> = state.workspaces[0].tabs.iter().map(|t| t.number).collect();
+
+        execute_navigate_action(&mut state, NavigateAction::MoveTabLeft);
+
+        let after: Vec<_> = state.workspaces[0].tabs.iter().map(|t| t.number).collect();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn default_move_tab_keys_map_to_reorder_actions() {
+        let state = state_with_workspaces(&["main"]);
+        let left = terminal_direct_navigation_action(
+            &state,
+            TerminalKey::new(KeyCode::Left, KeyModifiers::CONTROL | KeyModifiers::SHIFT),
+        );
+        let right = terminal_direct_navigation_action(
+            &state,
+            TerminalKey::new(KeyCode::Right, KeyModifiers::CONTROL | KeyModifiers::SHIFT),
+        );
+        assert_eq!(left, Some(NavigateAction::MoveTabLeft));
+        assert_eq!(right, Some(NavigateAction::MoveTabRight));
     }
 
     #[test]
