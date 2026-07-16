@@ -179,15 +179,20 @@ pub fn identify_agent_in_job(job: &crate::platform::ForegroundJob) -> Option<(Ag
         .iter()
         .find(|process| process.pid == job.process_group_id)
     {
-        let candidate = normalized_process_name(process);
-        if let Some(agent) = identify_agent(&candidate) {
-            return Some((agent, candidate));
+        if !is_agent_background_server(process) {
+            let candidate = normalized_process_name(process);
+            if let Some(agent) = identify_agent(&candidate) {
+                return Some((agent, candidate));
+            }
         }
     }
 
     let mut best: Option<(u8, Agent, String)> = None;
 
     for process in &job.processes {
+        if is_agent_background_server(process) {
+            continue;
+        }
         let candidate = normalized_process_name(process);
         let Some(agent) = identify_agent(&candidate) else {
             continue;
@@ -570,6 +575,30 @@ fn is_generic_runtime_or_shell(name: &str) -> bool {
     )
 }
 
+fn is_agent_background_server(process: &crate::platform::ForegroundProcess) -> bool {
+    if let Some(argv) = process.argv.as_deref() {
+        if argv.iter().any(|arg| is_agent_server_subcommand_token(arg)) {
+            return true;
+        }
+    }
+    if let Some(cmdline) = process.cmdline.as_deref() {
+        if cmdline
+            .split_whitespace()
+            .any(is_agent_server_subcommand_token)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_agent_server_subcommand_token(token: &str) -> bool {
+    let token = token
+        .trim_matches(|c| matches!(c, '"' | '\''))
+        .to_lowercase();
+    matches!(token.as_str(), "mcp-server" | "app-server")
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -762,6 +791,56 @@ mod tests {
         assert_eq!(
             identify_agent_in_job(&job),
             Some((Agent::Codex, "codex".to_string()))
+        );
+    }
+
+    #[test]
+    fn identify_agent_in_job_ignores_codex_mcp_server_child_of_claude() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 10,
+            processes: vec![
+                foreground_process(
+                    11,
+                    "codex",
+                    &["codex", "--model", "gpt-5.5", "mcp-server"],
+                ),
+                foreground_process(12, "claude", &["claude", "--model", "opus"]),
+            ],
+        };
+
+        assert_eq!(
+            identify_agent_in_job(&job),
+            Some((Agent::Claude, "claude".to_string()))
+        );
+    }
+
+    #[test]
+    fn identify_agent_in_job_ignores_bare_codex_mcp_server() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 11,
+            processes: vec![foreground_process(
+                11,
+                "codex",
+                &["codex", "--model", "gpt-5.5", "mcp-server"],
+            )],
+        };
+
+        assert_eq!(identify_agent_in_job(&job), None);
+    }
+
+    #[test]
+    fn identify_agent_in_job_ignores_codex_app_server_child_of_claude() {
+        let job = crate::platform::ForegroundJob {
+            process_group_id: 20,
+            processes: vec![
+                foreground_process(21, "codex", &["codex", "app-server"]),
+                foreground_process(22, "claude", &["claude"]),
+            ],
+        };
+
+        assert_eq!(
+            identify_agent_in_job(&job),
+            Some((Agent::Claude, "claude".to_string()))
         );
     }
 
