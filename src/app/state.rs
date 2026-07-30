@@ -1555,16 +1555,27 @@ impl AppState {
         section == SettingsSection::Integrations && self.integration_updates_available()
     }
 
+    /// Whether the pane focused by the given mode and active workspace asks the host
+    /// for mouse events. Taking both as arguments keeps this answerable for a view
+    /// that is not the loaded one, which is what per-client views need.
+    pub(crate) fn focused_pane_requests_mouse_capture_in(
+        &self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+        mode: Mode,
+        active_workspace_idx: Option<usize>,
+    ) -> bool {
+        mode == Mode::Terminal
+            && active_workspace_idx
+                .and_then(|idx| self.focused_runtime_in_workspace(terminal_runtimes, idx))
+                .and_then(crate::terminal::TerminalRuntime::input_state)
+                .is_some_and(crate::pane::InputState::mouse_reporting_enabled)
+    }
+
     pub(crate) fn focused_pane_requests_mouse_capture_from(
         &self,
         terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
     ) -> bool {
-        self.mode == Mode::Terminal
-            && self
-                .active
-                .and_then(|idx| self.focused_runtime_in_workspace(terminal_runtimes, idx))
-                .and_then(crate::terminal::TerminalRuntime::input_state)
-                .is_some_and(crate::pane::InputState::mouse_reporting_enabled)
+        self.focused_pane_requests_mouse_capture_in(terminal_runtimes, self.mode, self.active)
     }
 
     pub(crate) fn should_capture_host_mouse_from(

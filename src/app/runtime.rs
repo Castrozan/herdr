@@ -237,14 +237,7 @@ impl App {
             }
         }
 
-        if self
-            .copy_feedback_deadline
-            .is_some_and(|deadline| now >= deadline)
-        {
-            self.copy_feedback_deadline = None;
-            self.state.copy_feedback = None;
-            changed = true;
-        }
+        changed |= self.expire_due_view_transients(now);
 
         if self
             .next_animation_tick
@@ -254,16 +247,6 @@ impl App {
             self.next_animation_tick = Some(now + ANIMATION_INTERVAL);
             changed = true;
         }
-
-        if self
-            .selection_autoscroll_deadline
-            .is_some_and(|deadline| now >= deadline)
-        {
-            self.tick_selection_autoscroll(now);
-            changed = true;
-        }
-
-        changed |= self.clear_due_selection_highlight(now);
 
         self.start_git_status_refresh_if_due(now);
 
@@ -308,6 +291,32 @@ impl App {
             changed |= self.start_pending_agent_resumes(self.pending_agent_resume_due(now));
         }
         self.sync_animation_timer(now);
+        changed
+    }
+
+    /// Expires the transients whose state is per-client and whose deadline travels
+    /// with the client view, so whichever view is loaded only ever expires its own.
+    pub(crate) fn expire_due_view_transients(&mut self, now: Instant) -> bool {
+        let mut changed = false;
+
+        if self
+            .copy_feedback_deadline
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.copy_feedback_deadline = None;
+            self.state.copy_feedback = None;
+            changed = true;
+        }
+
+        if self
+            .selection_autoscroll_deadline
+            .is_some_and(|deadline| now >= deadline)
+        {
+            self.tick_selection_autoscroll(now);
+            changed = true;
+        }
+
+        changed |= self.clear_due_selection_highlight(now);
         changed
     }
 
