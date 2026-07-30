@@ -4254,6 +4254,7 @@ mod tests {
     use crate::protocol::CursorState;
 
     mod client_view;
+    mod render_scroll_patch;
 
     fn test_headless_server() -> HeadlessServer {
         test_headless_server_with_event_hub(api::EventHub::default())

@@ -1988,10 +1988,14 @@ fn ghostty_collect_dirty_patch(
     if render_state.update(terminal).is_err() {
         fallback!("render_state_update_error");
     }
+    let mut treat_every_row_as_dirty = false;
     match render_state.dirty() {
         Ok(crate::ghostty::Dirty::Clean) => finish!(TerminalDirtyPatchOutcome::Clean),
         Ok(crate::ghostty::Dirty::Partial) => {}
-        Ok(crate::ghostty::Dirty::Full) => fallback!("dirty_full"),
+        Ok(crate::ghostty::Dirty::Full) => {
+            crate::render_prof::event("dirty_collect.full_screen_rows");
+            treat_every_row_as_dirty = true;
+        }
         Err(_) => fallback!("dirty_read_error"),
     }
 
@@ -2021,7 +2025,7 @@ fn ghostty_collect_dirty_patch(
         let Ok(dirty) = rows.dirty() else {
             fallback!("row_dirty_read_error");
         };
-        if dirty {
+        if dirty || treat_every_row_as_dirty {
             match rows.selection() {
                 Ok(None) => {}
                 Ok(Some(_)) => fallback!("row_selection_present"),
