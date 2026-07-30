@@ -431,17 +431,23 @@ impl App {
     }
 
     pub(crate) fn focus_workspace_idx_via_api(&mut self, ws_idx: usize) {
-        let workspace_id = self.public_workspace_id(ws_idx);
+        let Some(workspace_id) = self.workspace_id_at(ws_idx) else {
+            return;
+        };
         self.runtime_workspace_focus("tui.workspace.focus", workspace_id);
     }
 
     pub(crate) fn close_workspace_idx_via_api(&mut self, ws_idx: usize) {
-        let workspace_id = self.public_workspace_id(ws_idx);
+        let Some(workspace_id) = self.workspace_id_at(ws_idx) else {
+            return;
+        };
         self.runtime_workspace_close("tui.workspace.close", workspace_id);
     }
 
     pub(crate) fn move_workspace_via_api(&mut self, source_ws_idx: usize, insert_idx: usize) {
-        let workspace_id = self.public_workspace_id(source_ws_idx);
+        let Some(workspace_id) = self.workspace_id_at(source_ws_idx) else {
+            return;
+        };
         self.runtime_workspace_move(
             "tui.workspace.move",
             crate::api::schema::WorkspaceMoveParams {

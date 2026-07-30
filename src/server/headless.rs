@@ -36,6 +36,8 @@ use bytes::Bytes;
 
 use crate::api;
 use crate::app;
+use crate::app::client_view::ClientView;
+use crate::app::deferred_client_requests::DeferredClientRequests;
 use crate::config;
 use crate::events::AppEvent;
 use crate::ipc::{
@@ -207,6 +209,12 @@ pub struct HeadlessServer {
     foreground_client_id: Option<u64>,
     /// The client whose saved ClientView is currently loaded into the shared AppState.
     client_view_owner: Option<u64>,
+    /// Deferred requests harvested from each client's input batch, replayed against
+    /// the view that raised them instead of whichever view is loaded when they drain.
+    pending_client_deferred_requests: Vec<(u64, DeferredClientRequests)>,
+    /// Workspace ids as of the last view reconcile, used to detect a workspace tree
+    /// change that invalidates index-bearing state held in saved views.
+    reconciled_workspace_ids: Option<Vec<String>>,
     /// Server-owned keybindings, restored when foreground clients use server mode.
     server_keybindings: crate::config::LiveKeybindConfig,
     /// Full server config warning shown to clients that use server keybindings.
@@ -404,6 +412,8 @@ impl HeadlessServer {
             next_client_id: 1,
             foreground_client_id: None,
             client_view_owner: None,
+            pending_client_deferred_requests: Vec::new(),
+            reconciled_workspace_ids: None,
             server_keybindings,
             server_config_diagnostic,
             server_config_diagnostic_without_keybindings,
@@ -544,15 +554,19 @@ impl HeadlessServer {
             }
 
             // 8. Wait for next event.
-            let next_deadline = self
-                .app
-                .next_headless_loop_deadline_with_git_refresh(
+            let next_deadline = [
+                self.app.next_headless_loop_deadline_with_git_refresh(
                     now,
                     needs_render,
                     self.has_app_client(),
-                )
-                .map(|deadline| deadline.min(now + CLIENT_ACCEPT_POLL_INTERVAL))
-                .or(Some(now + CLIENT_ACCEPT_POLL_INTERVAL));
+                ),
+                self.earliest_saved_client_view_deadline(),
+            ]
+            .into_iter()
+            .flatten()
+            .min()
+            .map(|deadline| deadline.min(now + CLIENT_ACCEPT_POLL_INTERVAL))
+            .or(Some(now + CLIENT_ACCEPT_POLL_INTERVAL));
             let event = {
                 tokio::select! {
                     maybe_api = self.app.api_rx.recv() => match maybe_api {
@@ -609,7 +623,39 @@ impl HeadlessServer {
         Ok(())
     }
 
+    /// Take the deferred requests this client's input just raised, while its view is
+    /// still the loaded one, so they can be replayed against it rather than against
+    /// whichever client's view is loaded when the batch drains.
+    fn harvest_deferred_requests_from_client(&mut self, client_id: u64) {
+        if self.client_view_owner != Some(client_id) {
+            return;
+        }
+        let requests = self.app.state.take_deferred_client_requests();
+        if requests.is_empty() {
+            return;
+        }
+        self.pending_client_deferred_requests
+            .push((client_id, requests));
+    }
+
     fn handle_deferred_requests_headless(&mut self) -> bool {
+        let mut needs_render = false;
+        for (client_id, requests) in std::mem::take(&mut self.pending_client_deferred_requests) {
+            if !self.clients.contains_key(&client_id) {
+                continue;
+            }
+            self.focus_client_view(client_id);
+            self.app.state.restore_deferred_client_requests(requests);
+            needs_render |= self.drain_deferred_requests_headless();
+        }
+        needs_render |= self.drain_deferred_requests_headless();
+        needs_render
+    }
+
+    /// Runs the deferred requests currently set on the shared state. Requests raised
+    /// by client input arrive here with that client's view loaded; requests raised by
+    /// the socket API or by timers run against the loaded view, as they always have.
+    fn drain_deferred_requests_headless(&mut self) -> bool {
         let mut needs_render = false;
 
         if self.app.state.request_complete_onboarding {
@@ -1207,8 +1253,44 @@ impl HeadlessServer {
 
     fn store_client_view(&mut self, client_id: u64) {
         if let Some(client) = self.clients.get_mut(&client_id) {
-            client.view = Some(self.app.state.snapshot_client_view());
+            client.view = Some(self.app.snapshot_client_view());
         }
+    }
+
+    /// Expires transients whose deadline is parked in a saved view. Each such client's
+    /// view is loaded first so the expiry clears its own state and not the owner's.
+    fn expire_due_client_view_transients(&mut self, now: Instant) -> bool {
+        let due_client_ids: Vec<u64> = self
+            .clients
+            .iter()
+            .filter(|(client_id, client)| {
+                client.is_full_app_client()
+                    && self.client_view_owner != Some(**client_id)
+                    && client
+                        .view
+                        .as_ref()
+                        .is_some_and(|view| view.has_due_transient(now))
+            })
+            .map(|(client_id, _)| *client_id)
+            .collect();
+
+        let mut changed = false;
+        for client_id in due_client_ids {
+            self.focus_client_view(client_id);
+            changed |= self.app.expire_due_view_transients(now);
+        }
+        changed
+    }
+
+    /// The earliest transient deadline held in a saved view, so the loop still wakes
+    /// on time for a client whose view is not the loaded one.
+    fn earliest_saved_client_view_deadline(&self) -> Option<Instant> {
+        self.clients
+            .iter()
+            .filter(|(client_id, _)| self.client_view_owner != Some(**client_id))
+            .filter_map(|(_, client)| client.view.as_ref())
+            .filter_map(ClientView::next_transient_deadline)
+            .min()
     }
 
     /// Load `client_id`'s saved view into the shared `AppState` scratch slot so the
@@ -1229,8 +1311,8 @@ impl HeadlessServer {
             return;
         };
         match &client.view {
-            Some(view) => self.app.state.restore_client_view(view),
-            None => client.view = Some(self.app.state.snapshot_client_view()),
+            Some(view) => self.app.restore_client_view(view),
+            None => client.view = Some(self.app.snapshot_client_view()),
         }
         self.client_view_owner = Some(client_id);
     }
@@ -1247,12 +1329,47 @@ impl HeadlessServer {
         }
     }
 
+    /// Whether the workspace tree changed since the last reconcile, recording the
+    /// current ids either way. The first call only records, so a client attaching
+    /// does not read the initial recording as a change.
+    fn workspace_tree_changed_since_last_reconcile(&mut self) -> bool {
+        let first_reconcile = self.reconciled_workspace_ids.is_none();
+        let changed = match &self.reconciled_workspace_ids {
+            Some(reconciled_ids) => {
+                reconciled_ids.len() != self.app.state.workspaces.len()
+                    || reconciled_ids
+                        .iter()
+                        .zip(&self.app.state.workspaces)
+                        .any(|(reconciled_id, workspace)| reconciled_id != &workspace.id)
+            }
+            None => true,
+        };
+        if changed {
+            self.reconciled_workspace_ids = Some(
+                self.app
+                    .state
+                    .workspaces
+                    .iter()
+                    .map(|workspace| workspace.id.clone())
+                    .collect(),
+            );
+        }
+        changed && !first_reconcile
+    }
+
     fn reconcile_client_views_with_workspaces(&mut self) {
+        let workspace_tree_changed = self.workspace_tree_changed_since_last_reconcile();
+        if workspace_tree_changed {
+            self.app.state.cancel_workspace_index_state();
+        }
         let default_workspace_id = self.app.state.workspaces.first().map(|ws| ws.id.clone());
         for client in self.clients.values_mut() {
             let Some(view) = client.view.as_mut() else {
                 continue;
             };
+            if workspace_tree_changed {
+                view.cancel_workspace_index_state();
+            }
             if view
                 .selected_workspace_id
                 .as_ref()
@@ -1539,6 +1656,7 @@ impl HeadlessServer {
             vec![crate::raw_input::RawInputEvent::Paste(path)],
             self.foreground_client_id == Some(client_id),
         );
+        self.harvest_deferred_requests_from_client(client_id);
         true
     }
 
@@ -2550,6 +2668,7 @@ impl HeadlessServer {
         let theme_changed = self.update_client_host_theme_from_events(client_id, &events);
         self.app
             .route_client_events(events, self.foreground_client_id == Some(client_id));
+        self.harvest_deferred_requests_from_client(client_id);
         if self.app.take_config_reloaded_from_disk() {
             self.reload_server_config(false);
         } else {
@@ -3202,32 +3321,50 @@ impl HeadlessServer {
         changed
     }
 
+    /// Streams each client the capture mode its own view asks for. Capture depends on
+    /// the client's mode and active workspace, so one value broadcast from whichever
+    /// view is loaded would leave clients on other workspaces without mouse events.
     fn stream_host_mouse_capture_mode(&mut self) {
-        let enabled = self
+        let loaded_view_enabled = self
             .app
             .state
             .should_capture_host_mouse_from(&self.app.terminal_runtimes);
-        let serialized = match Self::frame_server_message(&ServerMessage::MouseCapture { enabled })
-        {
-            Ok(framed) => framed,
-            Err(err) => {
-                warn!(err = %err, "failed to serialize mouse capture mode for clients");
-                return;
-            }
-        };
+        let client_capture_modes: Vec<(u64, bool)> = self
+            .clients
+            .iter()
+            .filter(|(_, client)| client.is_full_app_client())
+            .map(|(&client_id, client)| {
+                let enabled = match &client.view {
+                    Some(view) if self.client_view_owner != Some(client_id) => self
+                        .app
+                        .state
+                        .should_capture_host_mouse_in_view(&self.app.terminal_runtimes, view),
+                    _ => loaded_view_enabled,
+                };
+                (client_id, enabled)
+            })
+            .collect();
 
         let mut broken_clients: Vec<u64> = Vec::new();
-        for (&client_id, client) in &mut self.clients {
-            if !client.is_full_app_client() {
+        for (client_id, enabled) in client_capture_modes {
+            let Some(client) = self.clients.get_mut(&client_id) else {
                 continue;
-            }
+            };
             if client.host_mouse_capture_active == Some(enabled) {
                 continue;
             }
             let Some(writer) = &client.writer else {
                 continue;
             };
-            if writer.control.send(serialized.clone()).is_err() {
+            let serialized =
+                match Self::frame_server_message(&ServerMessage::MouseCapture { enabled }) {
+                    Ok(framed) => framed,
+                    Err(err) => {
+                        warn!(err = %err, "failed to serialize mouse capture mode for client");
+                        continue;
+                    }
+                };
+            if writer.control.send(serialized).is_err() {
                 debug!(
                     client_id,
                     "client writer channel closed during mouse capture update"
@@ -3792,15 +3929,8 @@ impl HeadlessServer {
             }
         }
 
-        if self
-            .app
-            .copy_feedback_deadline
-            .is_some_and(|deadline| now >= deadline)
-        {
-            self.app.copy_feedback_deadline = None;
-            self.app.state.copy_feedback = None;
-            changed = true;
-        }
+        changed |= self.expire_due_client_view_transients(now);
+        changed |= self.app.expire_due_view_transients(now);
 
         if self
             .app
@@ -3815,17 +3945,6 @@ impl HeadlessServer {
             self.app.next_animation_tick = Some(now + app::HEADLESS_ANIMATION_INTERVAL);
             changed = true;
         }
-
-        if self
-            .app
-            .selection_autoscroll_deadline
-            .is_some_and(|deadline| now >= deadline)
-        {
-            self.app.tick_selection_autoscroll(now);
-            changed = true;
-        }
-
-        changed |= self.app.clear_due_selection_highlight(now);
 
         if self.has_app_client() {
             self.app.start_git_status_refresh_if_due(now);
@@ -4355,6 +4474,8 @@ mod tests {
             next_client_id: 1,
             foreground_client_id: None,
             client_view_owner: None,
+            pending_client_deferred_requests: Vec::new(),
+            reconciled_workspace_ids: None,
             server_keybindings,
             server_config_diagnostic: None,
             server_config_diagnostic_without_keybindings: None,

@@ -12,8 +12,20 @@ impl App {
             .find_map(|(ws_idx, ws)| ws.pane_state(pane_id).map(|pane| (ws_idx, pane)))
     }
 
+    /// The stable id of the workspace at `ws_idx`, or `None` when the index is stale.
+    ///
+    /// Callers that take an index from long-lived UI state (a saved context menu, a
+    /// drag, a press) must use this, because per-client views let such an index
+    /// outlive the workspace it pointed at.
+    pub(crate) fn workspace_id_at(&self, ws_idx: usize) -> Option<String> {
+        self.state
+            .workspaces
+            .get(ws_idx)
+            .map(|workspace| workspace.id.clone())
+    }
+
     pub(super) fn public_workspace_id(&self, ws_idx: usize) -> String {
-        self.state.workspaces[ws_idx].id.clone()
+        self.workspace_id_at(ws_idx).unwrap_or_default()
     }
 
     pub(super) fn public_tab_id(&self, ws_idx: usize, tab_idx: usize) -> Option<String> {

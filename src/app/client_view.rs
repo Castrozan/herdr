@@ -1,9 +1,12 @@
+use std::time::Instant;
+
 use super::state::{
     AppState, ContextMenuState, CopyFeedback, CopyModeState, DragState, KeybindHelpState,
     MenuListState, Mode, NavigatorState, PaneFocusTarget, ProductAnnouncementState,
-    ReleaseNotesState, SelectionAutoscroll, TabPressState, ViewState,
-    WorkspacePressState, WorktreeCreateState, WorktreeOpenState, WorktreeRemoveState,
+    ReleaseNotesState, SelectionAutoscroll, TabPressState, ViewState, WorkspacePressState,
+    WorktreeCreateState, WorktreeOpenState, WorktreeRemoveState,
 };
+use super::App;
 use crate::layout::PaneId;
 use crate::selection::Selection;
 
@@ -44,9 +47,69 @@ pub(crate) struct ClientView {
     pub copy_feedback: Option<CopyFeedback>,
     pub agent_panel_scroll: usize,
     pub collapsed_space_keys: std::collections::HashSet<String>,
+    pub copy_feedback_deadline: Option<Instant>,
+    pub selection_autoscroll_deadline: Option<Instant>,
+    pub selection_highlight_clear_deadline: Option<Instant>,
+}
+
+impl ClientView {
+    /// The earliest expiry deadline this saved view is waiting on, so the headless
+    /// loop keeps scheduling wake-ups for transients parked outside the loaded view.
+    pub(crate) fn next_transient_deadline(&self) -> Option<Instant> {
+        [
+            self.copy_feedback_deadline,
+            self.selection_autoscroll_deadline,
+            self.selection_highlight_clear_deadline,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
+    pub(crate) fn has_due_transient(&self, now: Instant) -> bool {
+        self.next_transient_deadline()
+            .is_some_and(|deadline| now >= deadline)
+    }
+
+    /// Drops the interaction state that addresses workspaces and tabs by index.
+    ///
+    /// A saved view can hold an open context menu, a press, a drag, or a close
+    /// confirmation indefinitely, and those payloads carry raw indices that are
+    /// restored verbatim. Once another client mutates the workspace tree the indices
+    /// no longer name what the user aimed at, so the pending interaction is canceled
+    /// rather than replayed against a different workspace.
+    pub(crate) fn cancel_workspace_index_state(&mut self) {
+        self.context_menu = None;
+        self.drag = None;
+        self.workspace_press = None;
+        self.tab_press = None;
+        if matches!(self.mode, Mode::ContextMenu | Mode::ConfirmClose) {
+            self.mode = if self.active_workspace_id.is_some() {
+                Mode::Terminal
+            } else {
+                Mode::Navigate
+            };
+        }
+    }
 }
 
 impl AppState {
+    /// The loaded-state counterpart of [`ClientView::cancel_workspace_index_state`],
+    /// applied to the view that is currently swapped in.
+    pub(crate) fn cancel_workspace_index_state(&mut self) {
+        self.context_menu = None;
+        self.drag = None;
+        self.workspace_press = None;
+        self.tab_press = None;
+        if matches!(self.mode, Mode::ContextMenu | Mode::ConfirmClose) {
+            self.mode = if self.active.is_some() {
+                Mode::Terminal
+            } else {
+                Mode::Navigate
+            };
+        }
+    }
+
     fn active_workspace_id(&self) -> Option<String> {
         self.active
             .and_then(|idx| self.workspaces.get(idx))
@@ -59,6 +122,25 @@ impl AppState {
 
     pub(crate) fn workspace_index_by_id(&self, workspace_id: &str) -> Option<usize> {
         self.workspaces.iter().position(|ws| ws.id == workspace_id)
+    }
+
+    /// Whether the host should capture the mouse for a client sitting on this saved
+    /// view. Capture depends on the client's own mode and active workspace, so a
+    /// single value computed from the loaded view is wrong for everyone else.
+    pub(crate) fn should_capture_host_mouse_in_view(
+        &self,
+        terminal_runtimes: &crate::terminal::TerminalRuntimeRegistry,
+        client_view: &ClientView,
+    ) -> bool {
+        self.mouse_capture
+            || self.focused_pane_requests_mouse_capture_in(
+                terminal_runtimes,
+                client_view.mode,
+                client_view
+                    .active_workspace_id
+                    .as_deref()
+                    .and_then(|workspace_id| self.workspace_index_by_id(workspace_id)),
+            )
     }
 
     fn set_active_by_id(&mut self, workspace_id: Option<&str>) {
@@ -103,6 +185,9 @@ impl AppState {
             copy_feedback: self.copy_feedback.clone(),
             agent_panel_scroll: self.agent_panel_scroll,
             collapsed_space_keys: self.collapsed_space_keys.clone(),
+            copy_feedback_deadline: None,
+            selection_autoscroll_deadline: None,
+            selection_highlight_clear_deadline: None,
         }
     }
 
@@ -146,5 +231,27 @@ impl AppState {
         self.copy_feedback = client_view.copy_feedback.clone();
         self.agent_panel_scroll = client_view.agent_panel_scroll;
         self.collapsed_space_keys = client_view.collapsed_space_keys.clone();
+    }
+}
+
+impl App {
+    /// Saves the loaded view together with the expiry deadlines of its transients.
+    ///
+    /// The deadlines live on `App` rather than `AppState`, so leaving them behind
+    /// would let a deadline fire against another client's loaded state: the transient
+    /// it was meant to clear would come back on restore with nothing left to expire it.
+    pub(crate) fn snapshot_client_view(&self) -> ClientView {
+        let mut client_view = self.state.snapshot_client_view();
+        client_view.copy_feedback_deadline = self.copy_feedback_deadline;
+        client_view.selection_autoscroll_deadline = self.selection_autoscroll_deadline;
+        client_view.selection_highlight_clear_deadline = self.selection_highlight_clear_deadline;
+        client_view
+    }
+
+    pub(crate) fn restore_client_view(&mut self, client_view: &ClientView) {
+        self.state.restore_client_view(client_view);
+        self.copy_feedback_deadline = client_view.copy_feedback_deadline;
+        self.selection_autoscroll_deadline = client_view.selection_autoscroll_deadline;
+        self.selection_highlight_clear_deadline = client_view.selection_highlight_clear_deadline;
     }
 }

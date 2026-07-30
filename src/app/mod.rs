@@ -12,6 +12,7 @@ mod api_helpers;
 pub(crate) mod client_view;
 mod config_io;
 mod creation;
+pub(crate) mod deferred_client_requests;
 mod ids;
 mod input;
 mod runtime;
