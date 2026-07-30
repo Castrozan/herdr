@@ -1675,6 +1675,22 @@ impl HeadlessServer {
         })
     }
 
+    fn pane_effective_presentation(
+        &self,
+        pane_id: crate::layout::PaneId,
+    ) -> Option<crate::terminal::EffectivePresentation> {
+        self.app.state.workspaces.iter().find_map(|ws| {
+            ws.tabs.iter().find_map(|tab| {
+                let pane = tab.panes.get(&pane_id)?;
+                self.app
+                    .state
+                    .terminals
+                    .get(&pane.attached_terminal_id)
+                    .map(|terminal| terminal.effective_presentation())
+            })
+        })
+    }
+
     fn forward_pane_state_update_notifications_to_clients(
         &mut self,
         update: &crate::app::actions::PaneStateUpdate,
@@ -2049,6 +2065,7 @@ impl HeadlessServer {
                 // produce a second notification path.
                 let prev_state = self.pane_effective_state(pane_id_val);
                 let prev_agent_label = self.pane_effective_agent_label(pane_id_val);
+                let prev_presentation = self.pane_effective_presentation(pane_id_val);
 
                 self.sync_foreground_client_state();
                 self.app.handle_internal_event(ev);
@@ -2123,7 +2140,14 @@ impl HeadlessServer {
                     );
                 }
 
-                true
+                let rendered_surface_changed = prev_state != next_state
+                    || prev_agent_label != next_agent_label
+                    || prev_presentation != self.pane_effective_presentation(pane_id_val)
+                    || self.app.state.toast != toast_before;
+                if !rendered_surface_changed {
+                    crate::render_prof::event("full_render_skipped.hook_state_noop");
+                }
+                rendered_surface_changed
             }
             AppEvent::UpdateReady {
                 version,
@@ -2929,7 +2953,10 @@ impl HeadlessServer {
             _ => {}
         }
 
-        let mut changed = api::request_changes_ui(&msg.request);
+        let request_only_reports_agent_state =
+            matches!(&msg.request.method, api::schema::Method::PaneReportAgent(_));
+        let mut changed =
+            api::request_changes_ui(&msg.request) && !request_only_reports_agent_state;
         let skip_default_workspace = skip_default_workspace_for_request
             || matches!(
                 &msg.request.method,
@@ -2948,6 +2975,7 @@ impl HeadlessServer {
             crate::layout::PaneId,
             crate::detect::AgentState,
             Option<String>,
+            crate::terminal::EffectivePresentation,
         )> = {
             let terminals = &self.app.state.terminals;
             self.app
@@ -2964,6 +2992,7 @@ impl HeadlessServer {
                                     pane_id,
                                     terminal.state,
                                     terminal.effective_agent_label().map(str::to_string),
+                                    terminal.effective_presentation(),
                                 )
                             })
                         })
@@ -3038,7 +3067,10 @@ impl HeadlessServer {
         // Forward notifications for effective pane state changes that occurred
         // during the API request. Hook authority is already folded into
         // pane.state, so raw hook transitions must not produce separate sounds.
-        for (ws_idx, pane_id, prev_state, prev_agent_label) in &pane_states_before {
+        let mut effective_pane_surface_changed = false;
+        for (ws_idx, pane_id, prev_state, prev_agent_label, prev_presentation) in
+            &pane_states_before
+        {
             let pane_after = self
                 .app
                 .state
@@ -3060,9 +3092,15 @@ impl HeadlessServer {
             };
 
             let new_state = terminal_after.state;
+            if terminal_after.effective_agent_label().map(str::to_string) != *prev_agent_label
+                || terminal_after.effective_presentation() != *prev_presentation
+            {
+                effective_pane_surface_changed = true;
+            }
             if new_state == *prev_state {
                 continue;
             }
+            effective_pane_surface_changed = true;
 
             let is_active_tab = self.app.state.pane_is_in_active_tab(*ws_idx, *pane_id);
             let suppress_active_tab_notifications =
@@ -3146,6 +3184,15 @@ impl HeadlessServer {
                     );
                 }
             }
+        }
+
+        if request_only_reports_agent_state {
+            let reported_surface_changed =
+                effective_pane_surface_changed || toast_after != toast_before;
+            if !reported_surface_changed {
+                crate::render_prof::event("full_render_skipped.report_agent_noop");
+            }
+            changed |= reported_surface_changed;
         }
 
         if !skip_default_workspace && latest_app_client(&self.clients).is_some() {
@@ -4254,6 +4301,7 @@ mod tests {
     use crate::protocol::CursorState;
 
     mod client_view;
+    mod render_gate;
     mod render_scroll_patch;
 
     fn test_headless_server() -> HeadlessServer {
@@ -8767,7 +8815,10 @@ next_tab = ""
             respond_to,
         });
 
-        assert!(changed);
+        assert!(
+            !changed,
+            "a stale report rejected by sequence changes nothing rendered and must not force a full render"
+        );
         assert!(response_rx.recv_timeout(Duration::from_millis(100)).is_ok());
         assert_eq!(
             server.app.state.terminals.get(&terminal_id).unwrap().state,
