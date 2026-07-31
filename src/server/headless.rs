@@ -2162,10 +2162,9 @@ impl HeadlessServer {
                     );
                 }
 
-                let rendered_surface_changed = prev_state != next_state
+                prev_state != next_state
                     || prev_agent_label != next_agent_label
-                    || self.app.state.toast != toast_before;
-                rendered_surface_changed
+                    || self.app.state.toast != toast_before
             }
             AppEvent::HookStateReported {
                 pane_id,

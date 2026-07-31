@@ -151,7 +151,7 @@ fn dominant_causes(
         })
         .filter(|(_, value)| *value > 0)
         .collect();
-    causes.sort_by(|left, right| right.1.cmp(&left.1));
+    causes.sort_by_key(|cause| std::cmp::Reverse(cause.1));
     causes.truncate(20);
     causes
 }

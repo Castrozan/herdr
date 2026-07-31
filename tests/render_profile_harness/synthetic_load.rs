@@ -105,7 +105,7 @@ pub fn report_agent_states_until(
         let mut report_count = 0u64;
         let mut rotation = 0usize;
         while !stop.load(Ordering::Relaxed) {
-            let state = if rotation % AGENT_STATE_TRANSITION_EVERY == 0 {
+            let state = if rotation.is_multiple_of(AGENT_STATE_TRANSITION_EVERY) {
                 "idle"
             } else {
                 "working"
