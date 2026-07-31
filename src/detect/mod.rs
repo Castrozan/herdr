@@ -799,11 +799,7 @@ mod tests {
         let job = crate::platform::ForegroundJob {
             process_group_id: 10,
             processes: vec![
-                foreground_process(
-                    11,
-                    "codex",
-                    &["codex", "--model", "gpt-5.5", "mcp-server"],
-                ),
+                foreground_process(11, "codex", &["codex", "--model", "gpt-5.5", "mcp-server"]),
                 foreground_process(12, "claude", &["claude", "--model", "opus"]),
             ],
         };
