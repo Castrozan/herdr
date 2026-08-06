@@ -540,7 +540,7 @@ fn normalized_agent_lookup_name(name: &str) -> String {
     name
 }
 
-fn path_basename(path: &str) -> &str {
+pub(crate) fn path_basename(path: &str) -> &str {
     path.rsplit(['/', '\\'])
         .find(|component| !component.is_empty())
         .unwrap_or(path)

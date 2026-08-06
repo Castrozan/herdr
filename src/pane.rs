@@ -249,6 +249,14 @@ fn foreground_member_cwd_different_from_shell(
     shell_cwd: Option<&std::path::PathBuf>,
 ) -> Option<std::path::PathBuf> {
     let job = crate::detect::foreground_job(shell_pid)?;
+    let leader_is_shell = job
+        .processes
+        .iter()
+        .find(|process| process.pid == job.process_group_id)
+        .is_some_and(is_shell_process);
+    if !leader_is_shell {
+        return None;
+    }
     for process in job.processes {
         if process.pid == shell_pid {
             continue;
@@ -261,6 +269,39 @@ fn foreground_member_cwd_different_from_shell(
         }
     }
     None
+}
+
+#[cfg(unix)]
+fn is_shell_process(process: &crate::platform::ForegroundProcess) -> bool {
+    let comm_name = process.name.to_ascii_lowercase();
+    let argv0_basename = process
+        .argv0
+        .as_deref()
+        .map(crate::detect::path_basename)
+        .map(str::to_ascii_lowercase);
+    is_shell_name(&comm_name) || argv0_basename.as_deref().is_some_and(is_shell_name)
+}
+
+#[cfg(unix)]
+fn is_shell_name(name: &str) -> bool {
+    matches!(
+        name,
+        "sh" | "bash"
+            | "zsh"
+            | "fish"
+            | "dash"
+            | "ksh"
+            | "tcsh"
+            | "csh"
+            | "nu"
+            | "elvish"
+            | "xonsh"
+            | "osh"
+            | "yash"
+            | "cmd"
+            | "powershell"
+            | "pwsh"
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3920,5 +3961,55 @@ mod tests {
                 observed_at: _,
             } if delivered_pane == pane_id
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_leader_classification_recognizes_shells_and_shell_wrapper_leaders() {
+        let sh = crate::platform::ForegroundProcess {
+            pid: 1,
+            name: "sh".into(),
+            argv0: Some("/bin/sh".into()),
+            argv: None,
+            cmdline: None,
+        };
+        assert!(super::is_shell_process(&sh));
+        let login_dash = crate::platform::ForegroundProcess {
+            pid: 2,
+            name: "dash".into(),
+            argv0: Some("-dash".into()),
+            argv: None,
+            cmdline: None,
+        };
+        assert!(super::is_shell_process(&login_dash));
+        let script_leader = crate::platform::ForegroundProcess {
+            pid: 3,
+            name: "bash".into(),
+            argv0: Some("/home/user/bin/dev-server".into()),
+            argv: None,
+            cmdline: None,
+        };
+        assert!(super::is_shell_process(&script_leader));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_leader_classification_ignores_application_leaders() {
+        let opencode = crate::platform::ForegroundProcess {
+            pid: 4,
+            name: "opencode".into(),
+            argv0: Some("/nix/store/00000000000000000000000000000000-opencode/bin/opencode".into()),
+            argv: None,
+            cmdline: None,
+        };
+        assert!(!super::is_shell_process(&opencode));
+        let node = crate::platform::ForegroundProcess {
+            pid: 5,
+            name: "node".into(),
+            argv0: Some("/nix/store/00000000000000000000000000000000-node/bin/node".into()),
+            argv: None,
+            cmdline: None,
+        };
+        assert!(!super::is_shell_process(&node));
     }
 }
