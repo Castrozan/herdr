@@ -7,6 +7,7 @@
 - Added maki detection with idle, working, and blocked screen states. (#1301, thanks @tontinton)
 
 ### Fixed
+- New-terminal cwd following (`new_cwd = "follow"`) no longer inherits the working directory of daemon helpers such as LSP servers that chdir into their own install tree: the foreground process group is only looked through when its leader is a shell wrapper, so a foreground application's own working directory stays authoritative.
 - `herdr --remote` now installs remote helper binaries without routing the binary stream through a multiline `/bin/sh -c` command, fixing installs for non-POSIX login shells such as xonsh. (#1203, thanks @nhumrich)
 
 ## [0.7.3] - 2026-07-08

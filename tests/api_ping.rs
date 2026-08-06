@@ -848,6 +848,121 @@ fn pane_info_reports_foreground_cwd_without_changing_pane_cwd() {
     cleanup_spawned_herdr(child, base);
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn new_terminal_follows_foreground_app_cwd_ignoring_daemon_child_cwd() {
+    let _lock = test_lock();
+    let base = unique_test_dir();
+    let daemon_dir = base.join("daemon-child-cwd");
+    let marker = daemon_dir.join("daemon-ready");
+    let pid_file = base.join("foreground-app.pid");
+    fs::create_dir_all(&daemon_dir).unwrap();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    let socket_path = runtime_dir.join("herdr.sock");
+
+    let child = spawn_herdr_with_shell(&config_home, &runtime_dir, &socket_path, "/bin/bash");
+    wait_for_socket(&socket_path, Duration::from_secs(5));
+
+    let created = send_request(
+        &socket_path,
+        &format!(
+            r#"{{"id":"daemon_ws","method":"workspace.create","params":{{"cwd":"{}","focus":true}}}}"#,
+            base.display()
+        ),
+    );
+    let pane_id = created["result"]["root_pane"]["pane_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let workspace_id = created["result"]["workspace"]["workspace_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let command = format!(
+        "python3 -c 'import os,subprocess,time; subprocess.Popen([\"/bin/sh\",\"-c\",\"cd {} && touch {} && sleep 30\"]); open(\"{}\",\"w\").write(str(os.getpid())); time.sleep(30)'",
+        daemon_dir.display(),
+        marker.display(),
+        pid_file.display()
+    );
+    let send_text = send_request(
+        &socket_path,
+        &serde_json::json!({
+            "id": "daemon_send",
+            "method": "pane.send_text",
+            "params": {
+                "pane_id": pane_id,
+                "text": command,
+            },
+        })
+        .to_string(),
+    );
+    assert_eq!(send_text["result"]["type"], "ok");
+    let send_enter = send_request(
+        &socket_path,
+        &format!(
+            r#"{{"id":"daemon_enter","method":"pane.send_keys","params":{{"pane_id":"{}","keys":["Enter"]}}}}"#,
+            pane_id
+        ),
+    );
+    assert_eq!(send_enter["result"]["type"], "ok");
+    wait_for_path(&marker, Duration::from_secs(5));
+    wait_for_path(&pid_file, Duration::from_secs(5));
+
+    let foreground_pid: u32 = fs::read_to_string(&pid_file).unwrap().parse().unwrap();
+    assert_eq!(
+        fs::read_link(format!("/proc/{foreground_pid}/cwd")).unwrap(),
+        base
+    );
+
+    let pane = send_request(
+        &socket_path,
+        &format!(
+            r#"{{"id":"daemon_pane","method":"pane.get","params":{{"pane_id":"{}"}}}}"#,
+            pane_id
+        ),
+    );
+    assert_eq!(pane["result"]["pane"]["cwd"], base.display().to_string());
+    assert_eq!(
+        pane["result"]["pane"]["foreground_cwd"],
+        base.display().to_string()
+    );
+
+    let split = send_request(
+        &socket_path,
+        &serde_json::json!({
+            "id": "daemon_split",
+            "method": "pane.split",
+            "params": {
+                "target_pane_id": pane_id,
+                "direction": "right",
+                "focus": false,
+            },
+        })
+        .to_string(),
+    );
+    assert_eq!(split["result"]["pane"]["cwd"], base.display().to_string());
+
+    let tab = send_request(
+        &socket_path,
+        &serde_json::json!({
+            "id": "daemon_tab",
+            "method": "tab.create",
+            "params": {
+                "workspace_id": workspace_id,
+                "focus": false,
+            },
+        })
+        .to_string(),
+    );
+    assert_eq!(
+        tab["result"]["root_pane"]["cwd"],
+        base.display().to_string()
+    );
+
+    cleanup_spawned_herdr(child, base);
+}
+
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn agent_start_creates_named_terminal_over_socket() {
