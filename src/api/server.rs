@@ -669,6 +669,7 @@ mod tests {
             label: None,
             agent: Some("pi".into()),
             title: None,
+            terminal_title: None,
             display_agent: None,
             agent_status,
             custom_status: None,

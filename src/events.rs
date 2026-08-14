@@ -66,6 +66,10 @@ pub enum AppEvent {
         process_exited: bool,
         observed_at: Instant,
     },
+    TerminalTitleChanged {
+        pane_id: PaneId,
+        title: Option<String>,
+    },
     /// Hook-authoritative agent state was reported for a pane.
     HookStateReported {
         pane_id: PaneId,

@@ -641,6 +641,7 @@ mod tests {
             label: None,
             agent: None,
             title: None,
+            terminal_title: None,
             display_agent: None,
             agent_status: AgentStatus::Unknown,
             custom_status: None,

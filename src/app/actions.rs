@@ -1551,6 +1551,7 @@ impl AppState {
 
         let layout = crate::ui::compute_tab_bar_view(
             ws,
+            &self.terminals,
             area,
             self.tab_scroll,
             self.tab_scroll_follow_active,
@@ -2577,6 +2578,10 @@ impl AppState {
                         observed_at,
                     ))
                 })
+                .into_iter()
+                .collect(),
+            AppEvent::TerminalTitleChanged { pane_id, title } => self
+                .update_terminal_state(pane_id, |terminal| terminal.set_terminal_title(title))
                 .into_iter()
                 .collect(),
             AppEvent::HookStateReported {

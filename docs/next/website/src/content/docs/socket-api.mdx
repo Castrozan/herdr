@@ -584,6 +584,8 @@ If no native session reference is stored, the field is omitted.
 
 `pane.get`, `pane.list`, `agent.get`, and `agent.list` also expose `foreground_cwd` when Herdr can resolve the cwd of the process currently controlling the pane PTY. The existing `cwd` field remains the pane/workspace cwd used for labels, follow-cwd behavior, and restored session state.
 
+They also expose `terminal_title`, the OSC 0/2 title the pane process set for itself, with leading agent status glyphs stripped. Agent CLIs write their current task there, so this is a name the pane already carries without any hook. Herdr shows it on the pane border below `title` and `label`, and a tab that nobody renamed and that holds one pane borrows it as its own label until a `tab.rename` takes over. `tab.rename` with an empty label clears the custom name and hands the tab back to that derived label.
+
 Use `pane.report_metadata` when a user hook wants to customize presentation without taking over lifecycle state from a Herdr integration.
 
 ```json

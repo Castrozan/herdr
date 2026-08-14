@@ -767,6 +767,12 @@
             "terminal_id": {
               "type": "string"
             },
+            "terminal_title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "title": {
               "type": [
                 "string",
@@ -6497,6 +6503,12 @@
             },
             "terminal_id": {
               "type": "string"
+            },
+            "terminal_title": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "title": {
               "type": [

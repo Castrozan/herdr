@@ -435,6 +435,18 @@ impl Workspace {
         )
     }
 
+    pub fn tab_display_name_from(
+        &self,
+        tab_idx: usize,
+        terminals: &HashMap<TerminalId, TerminalState>,
+    ) -> Option<String> {
+        let tab = self.tabs.get(tab_idx)?;
+        if let Some(name) = &tab.custom_name {
+            return Some(name.clone());
+        }
+        Some(sole_pane_label(tab, terminals).unwrap_or_else(|| (tab_idx + 1).to_string()))
+    }
+
     pub fn switch_tab(&mut self, idx: usize) {
         if idx < self.tabs.len() {
             self.active_tab = idx;
@@ -1175,6 +1187,17 @@ pub(crate) struct TakenPane {
     pub workspace_empty: bool,
 }
 
+fn sole_pane_label(tab: &Tab, terminals: &HashMap<TerminalId, TerminalState>) -> Option<String> {
+    let mut panes = tab.panes.values();
+    let only_pane = panes.next()?;
+    if panes.next().is_some() {
+        return None;
+    }
+    terminals
+        .get(&only_pane.attached_terminal_id)?
+        .border_label(false)
+}
+
 #[cfg(test)]
 impl Workspace {
     pub(crate) fn test_new(name: &str) -> Self {
@@ -1543,6 +1566,84 @@ mod tests {
         assert!(ws.public_pane_number(new_pane).is_some());
         assert!(ws.move_tab(ws.active_tab, ws.tabs.len()));
         ws.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn tab_label_follows_the_title_of_the_only_pane_until_a_human_names_it() {
+        let mut ws = Workspace::test_new("test");
+        let pane = ws.tabs[0].root_pane;
+        let terminal_id = ws.tabs[0].panes[&pane].attached_terminal_id.clone();
+        let mut terminal = TerminalState::new(terminal_id.clone(), "/tmp".into());
+        terminal.set_terminal_title(Some("fix the auth bug".into()));
+        let terminals = HashMap::from([(terminal_id, terminal)]);
+
+        assert_eq!(
+            ws.tab_display_name_from(0, &terminals).as_deref(),
+            Some("fix the auth bug")
+        );
+        assert_eq!(ws.tab_display_name(0).as_deref(), Some("1"));
+
+        ws.tabs[0].set_custom_name("mine".into());
+        assert_eq!(
+            ws.tab_display_name_from(0, &terminals).as_deref(),
+            Some("mine")
+        );
+    }
+
+    #[test]
+    fn clearing_a_tab_name_hands_the_label_back_to_the_derived_one() {
+        let mut ws = Workspace::test_new("test");
+        let pane = ws.tabs[0].root_pane;
+        let terminal_id = ws.tabs[0].panes[&pane].attached_terminal_id.clone();
+        let mut terminal = TerminalState::new(terminal_id.clone(), "/tmp".into());
+        terminal.set_terminal_title(Some("fix the auth bug".into()));
+        let terminals = HashMap::from([(terminal_id, terminal)]);
+
+        ws.tabs[0].set_custom_name("mine".into());
+        assert!(!ws.tabs[0].is_auto_named());
+
+        ws.tabs[0].set_custom_name(String::new());
+        assert!(ws.tabs[0].is_auto_named());
+        assert_eq!(
+            ws.tab_display_name_from(0, &terminals).as_deref(),
+            Some("fix the auth bug")
+        );
+    }
+
+    #[test]
+    fn tab_label_falls_back_to_its_number_when_the_tab_holds_more_than_one_pane() {
+        let mut ws = Workspace::test_new("test");
+        let pane = ws.tabs[0].root_pane;
+        let terminal_id = ws.tabs[0].panes[&pane].attached_terminal_id.clone();
+        let mut terminal = TerminalState::new(terminal_id.clone(), "/tmp".into());
+        terminal.set_terminal_title(Some("fix the auth bug".into()));
+        let terminals = HashMap::from([(terminal_id, terminal)]);
+        ws.test_split(Direction::Vertical);
+
+        assert_eq!(
+            ws.tab_display_name_from(0, &terminals).as_deref(),
+            Some("1")
+        );
+    }
+
+    #[test]
+    fn tab_label_falls_back_to_its_number_when_no_pane_reported_a_title() {
+        let ws = Workspace::test_new("test");
+        let pane = ws.tabs[0].root_pane;
+        let terminal_id = ws.tabs[0].panes[&pane].attached_terminal_id.clone();
+        let terminals = HashMap::from([(
+            terminal_id.clone(),
+            TerminalState::new(terminal_id, "/tmp".into()),
+        )]);
+
+        assert_eq!(
+            ws.tab_display_name_from(0, &terminals).as_deref(),
+            Some("1")
+        );
+        assert_eq!(
+            ws.tab_display_name_from(0, &HashMap::new()).as_deref(),
+            Some("1")
+        );
     }
 
     #[test]

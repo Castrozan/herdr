@@ -81,6 +81,7 @@ pub struct TerminalState {
     pub agent_metadata: HashMap<String, AgentMetadata>,
     pub persisted_agent_session: Option<crate::agent_resume::PersistedAgentSession>,
     pub manual_label: Option<String>,
+    pub terminal_title: Option<String>,
     pub agent_name: Option<String>,
     hook_report_sequences: HashMap<String, u64>,
     suppressed_full_lifecycle_hook_reports: HashMap<String, SuppressedFullLifecycleHookReport>,
@@ -108,6 +109,7 @@ impl TerminalState {
             agent_metadata: HashMap::new(),
             persisted_agent_session: None,
             manual_label: None,
+            terminal_title: None,
             agent_name: None,
             hook_report_sequences: HashMap::new(),
             suppressed_full_lifecycle_hook_reports: HashMap::new(),
@@ -1324,12 +1326,14 @@ impl TerminalState {
     pub fn border_label(&self, show_agent_labels: bool) -> Option<String> {
         self.effective_title().or_else(|| {
             self.manual_label.clone().or_else(|| {
-                show_agent_labels
-                    .then(|| {
-                        self.effective_display_agent()
-                            .or_else(|| self.effective_agent_label().map(str::to_string))
-                    })
-                    .flatten()
+                self.terminal_title.clone().or_else(|| {
+                    show_agent_labels
+                        .then(|| {
+                            self.effective_display_agent()
+                                .or_else(|| self.effective_agent_label().map(str::to_string))
+                        })
+                        .flatten()
+                })
             })
         })
     }
@@ -1381,6 +1385,20 @@ pub(crate) fn stabilize_agent_detection(detection: crate::detect::AgentDetection
     detection.state
 }
 
+fn is_agent_status_glyph(character: char) -> bool {
+    matches!(
+        character,
+        '\u{2800}'..='\u{28ff}' | '\u{25d0}'..='\u{25d3}' | '\u{2733}'..='\u{273d}'
+    )
+}
+
+pub fn normalize_terminal_title(reported_title: &str) -> Option<String> {
+    let titled = reported_title
+        .trim_start_matches(is_agent_status_glyph)
+        .trim();
+    (!titled.is_empty()).then(|| titled.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1396,6 +1414,56 @@ mod tests {
             .join(name)
             .display()
             .to_string()
+    }
+
+    #[test]
+    fn terminal_title_normalization_drops_agent_status_glyphs() {
+        assert_eq!(
+            normalize_terminal_title("\u{2801} fix the auth bug"),
+            Some("fix the auth bug".to_string())
+        );
+        assert_eq!(
+            normalize_terminal_title("\u{2733} herdr"),
+            Some("herdr".to_string())
+        );
+        assert_eq!(
+            normalize_terminal_title("herdr | master"),
+            Some("herdr | master".to_string())
+        );
+        assert_eq!(normalize_terminal_title("\u{2801}\u{2809} "), None);
+        assert_eq!(normalize_terminal_title("   "), None);
+    }
+
+    #[test]
+    fn terminal_title_names_the_border_below_a_manual_label() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Idle);
+
+        assert_eq!(terminal.border_label(true).as_deref(), Some("pi"));
+
+        terminal.set_terminal_title(Some("fix the auth bug".into()));
+        assert_eq!(
+            terminal.border_label(true).as_deref(),
+            Some("fix the auth bug")
+        );
+        assert_eq!(
+            terminal.border_label(false).as_deref(),
+            Some("fix the auth bug")
+        );
+
+        terminal.set_manual_label("human name".into());
+        assert_eq!(terminal.border_label(true).as_deref(), Some("human name"));
+    }
+
+    #[test]
+    fn terminal_title_reports_a_mutation_only_when_it_changes() {
+        let mut terminal = test_terminal();
+
+        assert!(terminal.set_terminal_title(Some("one".into())).is_some());
+        assert!(terminal.set_terminal_title(Some("one".into())).is_none());
+        assert!(terminal.set_terminal_title(Some("two".into())).is_some());
+        assert!(terminal.set_terminal_title(None).is_some());
+        assert!(terminal.set_terminal_title(None).is_none());
     }
 
     #[test]

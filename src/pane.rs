@@ -142,6 +142,23 @@ fn active_pending_release(
     }
 }
 
+async fn publish_terminal_title_event(
+    state_events: mpsc::Sender<AppEvent>,
+    pane_id: PaneId,
+    title: Option<String>,
+) {
+    if let Err(e) = state_events
+        .send(AppEvent::TerminalTitleChanged { pane_id, title })
+        .await
+    {
+        warn!(
+            pane = pane_id.raw(),
+            err = %e,
+            "failed to deliver TerminalTitleChanged event"
+        );
+    }
+}
+
 async fn publish_state_changed_event(
     state_events: mpsc::Sender<AppEvent>,
     pane_id: PaneId,
@@ -614,6 +631,7 @@ fn spawn_basic_detection_task(
         let mut last_screen_scan_detection_content_seq = None;
         let mut agent_startup_grace_until = None;
         let mut pending_idle = PendingIdleConfirmation::default();
+        let mut last_published_terminal_title: Option<String> = None;
 
         loop {
             let sleep_duration = if pending_idle.active() {
@@ -763,6 +781,18 @@ fn spawn_basic_detection_task(
                         }
                     }
                 }
+            }
+
+            let observed_terminal_title =
+                crate::terminal::normalize_terminal_title(&terminal.agent_osc_title());
+            if observed_terminal_title != last_published_terminal_title {
+                last_published_terminal_title.clone_from(&observed_terminal_title);
+                publish_terminal_title_event(
+                    state_events.clone(),
+                    pane_id,
+                    observed_terminal_title,
+                )
+                .await;
             }
 
             let process_exited = pending_foreground_shell_clear
@@ -2003,6 +2033,7 @@ impl PaneRuntime {
                 let mut last_screen_scan_detection_content_seq = None;
                 let mut agent_startup_grace_until = None;
                 let mut pending_idle = PendingIdleConfirmation::default();
+                let mut last_published_terminal_title: Option<String> = None;
 
                 tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -2042,6 +2073,18 @@ impl PaneRuntime {
                             agent_startup_grace_until = None;
                             pending_idle.clear();
                         }
+                    }
+
+                    let observed_terminal_title =
+                        crate::terminal::normalize_terminal_title(&terminal.agent_osc_title());
+                    if observed_terminal_title != last_published_terminal_title {
+                        last_published_terminal_title.clone_from(&observed_terminal_title);
+                        publish_terminal_title_event(
+                            state_events.clone(),
+                            pane_id,
+                            observed_terminal_title,
+                        )
+                        .await;
                     }
 
                     let now = Instant::now();

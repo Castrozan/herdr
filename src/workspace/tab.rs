@@ -190,7 +190,7 @@ impl Tab {
     }
 
     pub fn set_custom_name(&mut self, name: String) {
-        self.custom_name = Some(name);
+        self.custom_name = (!name.is_empty()).then_some(name);
     }
 
     pub fn split_focused(

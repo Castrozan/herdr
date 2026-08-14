@@ -43,6 +43,7 @@ pub struct AgentMetadataReport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectivePresentation {
     pub title: Option<String>,
+    pub terminal_title: Option<String>,
     pub display_agent: Option<String>,
     pub custom_status: Option<String>,
     pub state_labels: HashMap<String, String>,
@@ -52,6 +53,7 @@ impl EffectivePresentation {
     fn empty() -> Self {
         Self {
             title: None,
+            terminal_title: None,
             display_agent: None,
             custom_status: None,
             state_labels: HashMap::new(),
@@ -76,6 +78,33 @@ impl TerminalState {
         self.metadata_report_sequences
             .insert(source.to_string(), seq);
         true
+    }
+
+    pub fn set_terminal_title(
+        &mut self,
+        terminal_title: Option<String>,
+    ) -> Option<TerminalStateMutation> {
+        if self.terminal_title == terminal_title {
+            return None;
+        }
+
+        let now = Instant::now();
+        let previous_agent_label = self.effective_agent_label().map(str::to_string);
+        let previous_known_agent = self.effective_known_agent();
+        let previous_state = self.state;
+        let previous_presentation = self.effective_presentation_for_state_at(previous_state, now);
+        self.terminal_title = terminal_title;
+
+        Some(TerminalStateMutation {
+            effective_state_change: self.recompute_effective_state(
+                previous_agent_label,
+                previous_known_agent,
+                previous_state,
+                previous_presentation,
+                now,
+            ),
+            session_ref_changed: false,
+        })
     }
 
     pub fn set_agent_metadata(
@@ -343,6 +372,7 @@ impl TerminalState {
     ) -> EffectivePresentation {
         let mut presentation = EffectivePresentation::empty();
         presentation.title = self.newest_metadata_title(now, enforce_ttl);
+        presentation.terminal_title = self.terminal_title.clone();
         presentation.display_agent = self.newest_metadata_display_agent(now, enforce_ttl);
         presentation.state_labels = self.effective_metadata_state_labels(now, enforce_ttl);
         presentation.custom_status =
