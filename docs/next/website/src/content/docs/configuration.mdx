@@ -253,6 +253,33 @@ Custom commands receive `HERDR_SOCKET_PATH`, `HERDR_BIN_PATH`, `HERDR_ACTIVE_WOR
 
 On Windows, custom command strings use `cmd.exe /d /c`, so environment variables use `%HERDR_BIN_PATH%` syntax. To run PowerShell syntax, invoke it explicitly, for example `powershell.exe -NoProfile -Command "..."`.
 
+## Giving a key back to the focused pane
+
+A key bound in Herdr never reaches the program running in the pane. `[[keys.passthrough]]`
+carves out an exception per process, so a full-screen program keeps a chord that Herdr
+otherwise owns.
+
+```toml
+[keys]
+previous_tab = ["prefix+pageup", "ctrl+pageup"]
+next_tab = ["prefix+pagedown", "ctrl+pagedown"]
+
+[[keys.passthrough]]
+key = ["ctrl+pageup", "ctrl+pagedown"]
+processes = ["nvim"]
+description = "let nvim cycle its own buffers"
+```
+
+`ctrl+pageup` now switches tabs in every pane except one running `nvim`, where the key
+goes to the editor instead. The prefixed binding is unaffected, so `prefix+pageup` still
+switches tabs from inside that editor.
+
+`processes` matches case-insensitively against every process in the pane's foreground
+job, under both the reported process name and the `argv[0]` basename. The whole job is
+read rather than its leader alone, so `git commit` opening an editor counts as that
+editor. A passthrough key deliberately shares its combo with the binding it hands over,
+so the overlap is not reported as a conflict. `prefix+` keys cannot be passed through.
+
 ## Theme
 
 Choose a built-in theme:

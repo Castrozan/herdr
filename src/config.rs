@@ -15,9 +15,10 @@ pub use self::{
         upsert_section_value,
     },
     keybinds::{
-        format_key_combo, normalize_key_combo, terminal_key_matches_combo, ActionKeybinds,
-        BindingConfig, CommandKeybindConfig, CompiledCopyModeBinding, CopyModeKeybindConfig,
-        CustomCommandAction, CustomCommandKeybind, IndexedKeybind, Keybinds, LiveKeybindConfig,
+        format_key_combo, normalize_key_combo, passthrough_processes_for_key,
+        terminal_key_matches_combo, ActionKeybinds, BindingConfig, CommandKeybindConfig,
+        CompiledCopyModeBinding, CopyModeKeybindConfig, CustomCommandAction, CustomCommandKeybind,
+        IndexedKeybind, Keybinds, LiveKeybindConfig, PassthroughKeybindConfig,
     },
     model::{
         validated_sidebar_bounds, AgentPanelSortConfig, Config, ConfigReloadReport,

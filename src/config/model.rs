@@ -5,8 +5,8 @@ use serde::{de, Deserialize, Deserializer, Serialize};
 
 use super::{
     ActionKeybinds, BindingConfig, CommandKeybindConfig, CopyModeKeybindConfig, IndexedKeybind,
-    Keybinds, SoundConfig, ThemeConfig, DEFAULT_MOBILE_WIDTH_THRESHOLD, DEFAULT_MOUSE_SCROLL_LINES,
-    DEFAULT_SCROLLBACK_LIMIT_BYTES,
+    Keybinds, PassthroughKeybindConfig, SoundConfig, ThemeConfig, DEFAULT_MOBILE_WIDTH_THRESHOLD,
+    DEFAULT_MOUSE_SCROLL_LINES, DEFAULT_SCROLLBACK_LIMIT_BYTES,
 };
 
 pub const MAX_TOAST_DELAY_SECONDS: u64 = 3600;
@@ -428,6 +428,9 @@ pub struct KeysConfig {
     /// Copy-mode key bindings that override or extend the built-in copy-mode keytable.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub copy_mode_command: Vec<CopyModeKeybindConfig>,
+    /// Keys the focused pane takes back while one of the listed processes runs there.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub passthrough: Vec<PassthroughKeybindConfig>,
     #[serde(skip_serializing)]
     pub(crate) user_fields: BTreeSet<&'static str>,
 }
@@ -551,6 +554,8 @@ pub(crate) struct KeysConfigOverlay {
     command: Option<Vec<CommandKeybindConfig>>,
     #[serde(skip_serializing)]
     copy_mode_command: Option<Vec<CopyModeKeybindConfig>>,
+    #[serde(skip_serializing)]
+    passthrough: Option<Vec<PassthroughKeybindConfig>>,
 }
 
 impl<'de> Deserialize<'de> for KeysConfig {
@@ -628,6 +633,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(indexed);
         apply_field!(command);
         apply_field!(copy_mode_command);
+        apply_field!(passthrough);
 
         Ok(keys)
     }
@@ -993,6 +999,7 @@ impl Default for KeysConfig {
             indexed: IndexedKeysConfig::default(),
             command: Vec::new(),
             copy_mode_command: Vec::new(),
+            passthrough: Vec::new(),
             user_fields: BTreeSet::new(),
         }
     }

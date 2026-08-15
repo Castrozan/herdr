@@ -135,6 +135,55 @@ pub struct CompiledCopyModeBinding {
     pub count: u16,
 }
 
+/// A key that the focused pane takes back while one of its processes runs.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct PassthroughKeybindConfig {
+    /// Key handed to the focused pane instead of running whatever else it binds.
+    pub key: BindingConfig,
+    /// Foreground process names that win the key, for example "nvim".
+    pub processes: Vec<String>,
+    /// Optional user-defined description for this passthrough entry.
+    pub description: Option<String>,
+}
+
+impl Default for PassthroughKeybindConfig {
+    fn default() -> Self {
+        Self {
+            key: BindingConfig::empty(),
+            processes: Vec::new(),
+            description: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledPassthroughBinding {
+    pub bindings: ActionKeybinds,
+    /// Lowercased process names, compared against the pane's foreground job.
+    pub processes: Vec<String>,
+}
+
+impl CompiledPassthroughBinding {
+    /// True when one of this entry's processes runs in the pane's foreground job.
+    pub fn claimed_by(&self, foreground_process_names: &[String]) -> bool {
+        self.processes
+            .iter()
+            .any(|process| foreground_process_names.iter().any(|name| name == process))
+    }
+}
+
+/// Processes that take `key` back from its binding, one entry per matching rule.
+pub fn passthrough_processes_for_key(
+    passthroughs: &[CompiledPassthroughBinding],
+    key: TerminalKey,
+) -> Vec<&CompiledPassthroughBinding> {
+    passthroughs
+        .iter()
+        .filter(|entry| entry.bindings.matches_direct_key(key))
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CustomCommandAction {
     Shell,
@@ -376,6 +425,7 @@ pub struct Keybinds {
     pub toggle_sidebar: ActionKeybinds,
     pub custom_commands: Vec<CustomCommandKeybind>,
     pub copy_mode_commands: Vec<CompiledCopyModeBinding>,
+    pub passthroughs: Vec<CompiledPassthroughBinding>,
 }
 
 impl Default for Keybinds {
@@ -541,6 +591,7 @@ impl Config {
             toggle_sidebar: empty_action!(),
             custom_commands: Vec::new(),
             copy_mode_commands: Vec::new(),
+            passthroughs: Vec::new(),
         };
 
         macro_rules! field_source {
@@ -723,6 +774,8 @@ impl Config {
 
         keybinds.copy_mode_commands =
             compile_copy_mode_bindings(&self.keys.copy_mode_command, &mut diagnostics);
+        keybinds.passthroughs =
+            compile_passthrough_bindings(&self.keys.passthrough, &mut diagnostics);
 
         (prefix_diag, prefix, diagnostics, keybinds)
     }
@@ -792,6 +845,81 @@ fn append_custom_command_bindings(
             description: command.description.clone(),
         });
     }
+}
+
+/// Compile passthrough entries outside the binding registry: a passthrough key
+/// is meant to share a combo with the action it hands to the pane, so
+/// registering it would report that overlap as a conflict.
+fn compile_passthrough_bindings(
+    user: &[PassthroughKeybindConfig],
+    diagnostics: &mut Vec<String>,
+) -> Vec<CompiledPassthroughBinding> {
+    let mut compiled = Vec::new();
+    for (index, entry) in user.iter().enumerate() {
+        let field = format!("keys.passthrough[{index}]");
+        let processes: Vec<String> = entry
+            .processes
+            .iter()
+            .map(|process| process.trim().to_ascii_lowercase())
+            .filter(|process| !process.is_empty())
+            .collect();
+        if processes.is_empty() {
+            let diag =
+                format!("passthrough has no processes: {field}.processes; disabling passthrough");
+            warn!(message = %diag, "config diagnostic");
+            diagnostics.push(diag);
+            continue;
+        }
+        let bindings = parse_passthrough_key(&format!("{field}.key"), &entry.key, diagnostics);
+        if bindings.bindings.is_empty() {
+            continue;
+        }
+        compiled.push(CompiledPassthroughBinding {
+            bindings,
+            processes,
+        });
+    }
+    compiled
+}
+
+fn parse_passthrough_key(
+    field: &str,
+    config: &BindingConfig,
+    diagnostics: &mut Vec<String>,
+) -> ActionKeybinds {
+    let mut bindings = Vec::new();
+    for raw in config.values() {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        match parse_binding_string(raw) {
+            Some(ParsedBinding::Single(binding)) => {
+                if binding.trigger.is_prefix() {
+                    let diag = format!(
+                        "passthrough keybinding cannot use prefix: {field} = {raw:?}; disabling binding"
+                    );
+                    warn!(message = %diag, "config diagnostic");
+                    diagnostics.push(diag);
+                    continue;
+                }
+                bindings.push(binding);
+            }
+            Some(ParsedBinding::Range(_)) => {
+                let diag = format!(
+                    "range keybinding is only valid for indexed actions: {field} = {raw:?}; disabling binding"
+                );
+                warn!(message = %diag, "config diagnostic");
+                diagnostics.push(diag);
+            }
+            None => {
+                let diag = format!("invalid keybinding: {field} = {raw:?}; disabling binding");
+                warn!(message = %diag, "config diagnostic");
+                diagnostics.push(diag);
+            }
+        }
+    }
+    ActionKeybinds { bindings }
 }
 
 fn compile_copy_mode_bindings(
@@ -2539,5 +2667,111 @@ description = "say hello"
             keybinds.custom_commands[0].description,
             Some("say hello".to_string())
         );
+    }
+
+    #[test]
+    fn passthrough_entry_compiles_with_lowercased_processes() {
+        let config: Config = toml::from_str(
+            r#"
+[[keys.passthrough]]
+key = ["ctrl+pageup", "ctrl+pagedown"]
+processes = ["NVim", "  vim  "]
+"#,
+        )
+        .expect("config parses");
+        let keybinds = config.keybinds();
+
+        assert_eq!(keybinds.passthroughs.len(), 1);
+        let entry = &keybinds.passthroughs[0];
+        assert_eq!(entry.processes, vec!["nvim".to_string(), "vim".to_string()]);
+        assert!(entry
+            .bindings
+            .matches_direct_key(TerminalKey::new(KeyCode::PageUp, KeyModifiers::CONTROL)));
+        assert!(entry
+            .bindings
+            .matches_direct_key(TerminalKey::new(KeyCode::PageDown, KeyModifiers::CONTROL)));
+    }
+
+    #[test]
+    fn passthrough_shares_its_key_with_the_action_it_hands_over() {
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+previous_tab = "ctrl+pageup"
+
+[[keys.passthrough]]
+key = "ctrl+pageup"
+processes = ["nvim"]
+"#,
+        )
+        .expect("config parses");
+        let keybinds = config.keybinds();
+
+        // The shared combo is deliberate, so neither side is dropped as a conflict.
+        assert!(keybinds
+            .previous_tab
+            .matches_direct_key(TerminalKey::new(KeyCode::PageUp, KeyModifiers::CONTROL)));
+        assert_eq!(keybinds.passthroughs.len(), 1);
+    }
+
+    #[test]
+    fn passthrough_without_processes_is_disabled() {
+        let config: Config = toml::from_str(
+            r#"
+[[keys.passthrough]]
+key = "ctrl+pageup"
+processes = []
+"#,
+        )
+        .expect("config parses");
+
+        assert!(config.keybinds().passthroughs.is_empty());
+    }
+
+    #[test]
+    fn passthrough_rejects_a_prefix_key() {
+        let config: Config = toml::from_str(
+            r#"
+[[keys.passthrough]]
+key = "prefix+pageup"
+processes = ["nvim"]
+"#,
+        )
+        .expect("config parses");
+
+        assert!(config.keybinds().passthroughs.is_empty());
+    }
+
+    #[test]
+    fn passthrough_claims_the_key_only_for_its_own_processes() {
+        let config: Config = toml::from_str(
+            r#"
+[[keys.passthrough]]
+key = "ctrl+pageup"
+processes = ["nvim"]
+"#,
+        )
+        .expect("config parses");
+        let keybinds = config.keybinds();
+        let page_up = TerminalKey::new(KeyCode::PageUp, KeyModifiers::CONTROL);
+        let page_down = TerminalKey::new(KeyCode::PageDown, KeyModifiers::CONTROL);
+
+        let claims = passthrough_processes_for_key(&keybinds.passthroughs, page_up);
+        assert_eq!(claims.len(), 1);
+        assert!(claims[0].claimed_by(&["git".to_string(), "nvim".to_string()]));
+        assert!(!claims[0].claimed_by(&["bash".to_string(), "claude".to_string()]));
+        assert!(!claims[0].claimed_by(&[]));
+        assert!(passthrough_processes_for_key(&keybinds.passthroughs, page_down).is_empty());
+    }
+
+    #[test]
+    fn no_passthrough_config_claims_nothing() {
+        let keybinds = Config::default().keybinds();
+
+        assert!(passthrough_processes_for_key(
+            &keybinds.passthroughs,
+            TerminalKey::new(KeyCode::PageUp, KeyModifiers::CONTROL)
+        )
+        .is_empty());
     }
 }

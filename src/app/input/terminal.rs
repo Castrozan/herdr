@@ -27,6 +27,49 @@ impl App {
         }
     }
 
+    /// True when a `keys.passthrough` entry matches this key and one of its
+    /// processes runs in the focused pane, which means the pane keeps the key.
+    fn focused_pane_claims_key(&self, key: TerminalKey) -> bool {
+        let claims =
+            crate::config::passthrough_processes_for_key(&self.state.keybinds.passthroughs, key);
+        if claims.is_empty() {
+            return false;
+        }
+        let foreground_process_names = self.focused_pane_foreground_process_names();
+        claims
+            .iter()
+            .any(|claim| claim.claimed_by(&foreground_process_names))
+    }
+
+    /// Lowercased names of every process in the focused pane's foreground job,
+    /// under both the reported name and the `argv[0]` basename. The whole job is
+    /// read rather than its leader alone so `git commit` opening an editor counts.
+    fn focused_pane_foreground_process_names(&self) -> Vec<String> {
+        let Some(ws_idx) = self.state.active else {
+            return Vec::new();
+        };
+        let Some(runtime) = self
+            .state
+            .focused_runtime_in_workspace(&self.terminal_runtimes, ws_idx)
+        else {
+            return Vec::new();
+        };
+        let Some(shell_pid) = runtime.child_pid() else {
+            return Vec::new();
+        };
+        let Some(job) = crate::detect::foreground_job(shell_pid) else {
+            return Vec::new();
+        };
+        let mut names = Vec::new();
+        for process in &job.processes {
+            names.push(process.name.to_ascii_lowercase());
+            if let Some(argv0) = process.argv0.as_deref() {
+                names.push(crate::detect::path_basename(argv0).to_ascii_lowercase());
+            }
+        }
+        names
+    }
+
     fn prepare_terminal_key_forward(&mut self, key: TerminalKey) -> Option<PreparedPaneInput> {
         self.state.clear_selection();
         self.selection_autoscroll_deadline = None;
@@ -34,49 +77,58 @@ impl App {
 
         let key_event = key.as_key_event();
 
-        if let Some(action) = super::terminal_direct_non_indexed_navigation_action(&self.state, key)
-        {
-            debug!(
-                code = ?key_event.code,
-                modifiers = ?key_event.modifiers,
-                kind = ?key_event.kind,
-                action = ?action,
-                "intercepted terminal direct keybinding before forwarding to pane"
-            );
-            if action == super::navigate::NavigateAction::EditScrollback {
-                self.launch_focused_scrollback_editor();
-            } else {
-                self.execute_tui_navigate_action(action, super::navigate::ActionContext::Direct);
+        // A pane that owns this key by config keeps it: forward the key instead of
+        // running whatever else binds it, so a full-screen editor still sees the chord.
+        if !self.focused_pane_claims_key(key) {
+            if let Some(action) =
+                super::terminal_direct_non_indexed_navigation_action(&self.state, key)
+            {
+                debug!(
+                    code = ?key_event.code,
+                    modifiers = ?key_event.modifiers,
+                    kind = ?key_event.kind,
+                    action = ?action,
+                    "intercepted terminal direct keybinding before forwarding to pane"
+                );
+                if action == super::navigate::NavigateAction::EditScrollback {
+                    self.launch_focused_scrollback_editor();
+                } else {
+                    self.execute_tui_navigate_action(
+                        action,
+                        super::navigate::ActionContext::Direct,
+                    );
+                }
+                return None;
             }
-            return None;
-        }
 
-        if let Some(binding) = super::navigate::command_for_key(
-            &self.state,
-            key,
-            super::navigate::BindingDispatch::Direct,
-        ) {
-            debug!(
-                code = ?key_event.code,
-                modifiers = ?key_event.modifiers,
-                kind = ?key_event.kind,
-                command = %binding.label,
-                "intercepted terminal direct custom command before forwarding to pane"
-            );
-            self.launch_custom_command(binding, super::navigate::ActionContext::Direct);
-            return None;
-        }
+            if let Some(binding) = super::navigate::command_for_key(
+                &self.state,
+                key,
+                super::navigate::BindingDispatch::Direct,
+            ) {
+                debug!(
+                    code = ?key_event.code,
+                    modifiers = ?key_event.modifiers,
+                    kind = ?key_event.kind,
+                    command = %binding.label,
+                    "intercepted terminal direct custom command before forwarding to pane"
+                );
+                self.launch_custom_command(binding, super::navigate::ActionContext::Direct);
+                return None;
+            }
 
-        if let Some(action) = super::terminal_direct_indexed_navigation_action(&self.state, key) {
-            debug!(
-                code = ?key_event.code,
-                modifiers = ?key_event.modifiers,
-                kind = ?key_event.kind,
-                action = ?action,
-                "intercepted terminal direct indexed keybinding before forwarding to pane"
-            );
-            self.execute_tui_navigate_action(action, super::navigate::ActionContext::Direct);
-            return None;
+            if let Some(action) = super::terminal_direct_indexed_navigation_action(&self.state, key)
+            {
+                debug!(
+                    code = ?key_event.code,
+                    modifiers = ?key_event.modifiers,
+                    kind = ?key_event.kind,
+                    action = ?action,
+                    "intercepted terminal direct indexed keybinding before forwarding to pane"
+                );
+                self.execute_tui_navigate_action(action, super::navigate::ActionContext::Direct);
+                return None;
+            }
         }
 
         if self.state.is_prefix_key(key) {

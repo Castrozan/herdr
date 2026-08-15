@@ -229,6 +229,13 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # type = "pane"
 # command = "lazygit"
 
+# Passthrough keys go to the focused pane instead of running whatever Herdr binds
+# to them, while one of the listed processes runs in that pane's foreground job.
+# Names match case-insensitively; prefix+ keys cannot be passed through.
+# [[keys.passthrough]]
+# key = ["ctrl+pageup", "ctrl+pagedown"]
+# processes = ["nvim"]
+
 # Copy-mode keys are user-bindable, like tmux's copy-mode-vi table.
 # Each entry maps a modal key to a copy-mode command. Unset keys fall back to the
 # built-in vi-style keytable, so list only the keys you want to override or add.
