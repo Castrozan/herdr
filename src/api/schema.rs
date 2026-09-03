@@ -115,6 +115,10 @@ pub enum Method {
     AgentFocus(AgentTarget),
     #[serde(rename = "agent.start")]
     AgentStart(AgentStartParams),
+    #[serde(rename = "agent.restart")]
+    AgentRestart(AgentRestartParams),
+    #[serde(rename = "agent.exit")]
+    AgentExit(AgentTarget),
     #[serde(rename = "pane.split")]
     PaneSplit(PaneSplitParams),
     #[serde(rename = "pane.swap")]
@@ -205,5 +209,7 @@ pub enum Method {
     PluginPaneClose(PluginPaneCloseParams),
 }
 
+#[cfg(test)]
+mod lifecycle_tests;
 #[cfg(test)]
 mod tests;

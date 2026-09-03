@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::api::schema::{
-    AgentReadParams, AgentRenameParams, AgentSendParams, AgentStartParams, AgentStatus,
-    AgentTarget, EmptyParams, Method, ReadFormat, ReadSource, Request, Subscription,
+    AgentReadParams, AgentRenameParams, AgentRestartParams, AgentSendParams, AgentStartParams,
+    AgentStatus, AgentTarget, EmptyParams, Method, ReadFormat, ReadSource, Request, Subscription,
 };
 
 pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
@@ -21,6 +21,8 @@ pub(super) fn run_agent_command(args: &[String]) -> std::io::Result<i32> {
         "wait" => agent_wait(&args[1..]),
         "attach" => agent_attach(&args[1..]),
         "start" => agent_start(&args[1..]),
+        "restart" => agent_restart(&args[1..]),
+        "exit" => agent_exit(&args[1..]),
         "explain" => agent_explain(&args[1..]),
         "help" | "--help" | "-h" => {
             print_agent_help();
@@ -369,6 +371,64 @@ fn agent_start(args: &[String]) -> std::io::Result<i32> {
     })?)
 }
 
+fn agent_restart(args: &[String]) -> std::io::Result<i32> {
+    let mut prompt = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--prompt" => {
+                let Some(value) = args.get(index + 1) else {
+                    eprintln!("missing value for --prompt");
+                    return Ok(2);
+                };
+                prompt = Some(value.clone());
+                index += 2;
+            }
+            "help" | "--help" | "-h" => {
+                eprintln!("usage: herdr agent restart [--prompt TEXT]");
+                return Ok(0);
+            }
+            value => {
+                eprintln!("unknown option: {value}");
+                return Ok(2);
+            }
+        }
+    }
+    let Some(target) = current_agent_target() else {
+        return Ok(1);
+    };
+
+    super::print_response(&super::send_request(&Request {
+        id: "cli:agent:restart".into(),
+        method: Method::AgentRestart(AgentRestartParams { target, prompt }),
+    })?)
+}
+
+fn agent_exit(args: &[String]) -> std::io::Result<i32> {
+    if !args.is_empty() {
+        eprintln!("usage: herdr agent exit");
+        return Ok(2);
+    }
+    let Some(target) = current_agent_target() else {
+        return Ok(1);
+    };
+
+    super::print_response(&super::send_request(&Request {
+        id: "cli:agent:exit".into(),
+        method: Method::AgentExit(AgentTarget { target }),
+    })?)
+}
+
+fn current_agent_target() -> Option<String> {
+    std::env::var("HERDR_PANE_ID")
+        .ok()
+        .filter(|target| !target.trim().is_empty())
+        .or_else(|| {
+            eprintln!("agent lifecycle commands require the caller's HERDR_PANE_ID");
+            None
+        })
+}
+
 fn agent_list(args: &[String]) -> std::io::Result<i32> {
     if !args.is_empty() {
         eprintln!("usage: herdr agent list");
@@ -676,6 +736,8 @@ fn print_agent_help() {
     eprintln!("  herdr agent wait <target> --status <idle|working|blocked|unknown> [--timeout MS]");
     eprintln!("  herdr agent attach <target> [--takeover]");
     eprintln!("  herdr agent start <name> [--cwd PATH] [--workspace ID] [--tab ID] [--split right|down] [--env KEY=VALUE] [--focus|--no-focus] -- <argv...>");
+    eprintln!("  herdr agent restart [--prompt TEXT]");
+    eprintln!("  herdr agent exit");
     eprintln!("  herdr agent explain <target> [--json]");
     eprintln!("  herdr agent explain --file PATH --agent LABEL [--json]");
     eprintln!("  targets accept terminal ids, unique agent names, detected/reported agent labels, and legacy pane ids");

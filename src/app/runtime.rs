@@ -87,6 +87,7 @@ impl App {
             changed |= self.ensure_default_workspace();
         }
         let _ = msg.respond_to.send(response);
+        self.shutdown_detached_terminal_runtimes();
         self.sync_prefix_input_source(previous_mode);
         changed
     }
@@ -290,6 +291,7 @@ impl App {
             self.sync_pending_agent_resume_deadline(now);
             changed |= self.start_pending_agent_resumes(self.pending_agent_resume_due(now));
         }
+        changed |= self.deliver_pending_agent_continuations(now);
         self.sync_animation_timer(now);
         changed
     }
@@ -572,6 +574,7 @@ impl App {
             self.next_agent_manifest_update_check,
             self.agent_metadata_deadline,
             self.pending_agent_resume_deadline,
+            self.pending_agent_continuation_deadline,
             self.session_save_deadline,
             self.selection_autoscroll_deadline,
             self.selection_highlight_clear_deadline,

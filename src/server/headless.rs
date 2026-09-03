@@ -3156,6 +3156,7 @@ impl HeadlessServer {
                 .handle_api_request_after_internal_events_drained(msg.request)
         };
         let _ = msg.respond_to.send(response);
+        self.app.shutdown_detached_terminal_runtimes();
 
         // Forward new toast state only when a client-local delivery mode is selected.
         // Herdr delivery renders the toast in-frame and must not ask clients to
@@ -3996,6 +3997,7 @@ impl HeadlessServer {
                 .app
                 .start_pending_agent_resumes(self.app.pending_agent_resume_due(now));
         }
+        changed |= self.app.deliver_pending_agent_continuations(now);
         self.app.sync_headless_animation_timer(now);
         changed
     }

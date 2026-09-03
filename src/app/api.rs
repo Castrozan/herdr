@@ -1,6 +1,7 @@
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
+mod agent_lifecycle;
 mod agents;
 mod env;
 mod integrations;
@@ -22,6 +23,7 @@ const WINDOWS_POWERSHELL_AGENT_EXIT_RESPAWN_GRACE: Duration = Duration::from_sec
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeExitAction {
+    ResumeAgent,
     RespawnShell,
     ClosePane,
 }
@@ -157,13 +159,20 @@ impl App {
                 self.emit_pane_state_update(&update);
                 self.emit_terminal_or_system_agent_notifications(std::slice::from_ref(&update));
             }
-            if self.runtime_exit_action(*pane_id) == RuntimeExitAction::RespawnShell
-                && self.respawn_shell_for_launch_pane(*pane_id)
-            {
-                self.overlay_panes.remove(pane_id);
-                self.render_dirty.store(true, Ordering::Release);
-                self.render_notify.notify_one();
-                return;
+            match self.runtime_exit_action(*pane_id) {
+                RuntimeExitAction::ResumeAgent => {
+                    self.overlay_panes.remove(pane_id);
+                    self.render_dirty.store(true, Ordering::Release);
+                    self.render_notify.notify_one();
+                    return;
+                }
+                RuntimeExitAction::RespawnShell if self.respawn_shell_for_launch_pane(*pane_id) => {
+                    self.overlay_panes.remove(pane_id);
+                    self.render_dirty.store(true, Ordering::Release);
+                    self.render_notify.notify_one();
+                    return;
+                }
+                RuntimeExitAction::RespawnShell | RuntimeExitAction::ClosePane => {}
             }
         }
 
@@ -455,7 +464,11 @@ impl App {
             return RuntimeExitAction::ClosePane;
         };
 
-        if terminal.respawn_shell_on_exit || self.should_respawn_shell_after_agent_exit(terminal) {
+        if terminal.pending_agent_resume_plan.is_some() {
+            RuntimeExitAction::ResumeAgent
+        } else if terminal.respawn_shell_on_exit
+            || self.should_respawn_shell_after_agent_exit(terminal)
+        {
             RuntimeExitAction::RespawnShell
         } else {
             RuntimeExitAction::ClosePane
@@ -941,6 +954,8 @@ impl App {
             Method::AgentFocus(target) => return self.handle_agent_focus(request.id, target),
             Method::AgentRename(params) => return self.handle_agent_rename(request.id, params),
             Method::AgentStart(params) => return self.handle_agent_start(request.id, params),
+            Method::AgentRestart(params) => return self.handle_agent_restart(request.id, params),
+            Method::AgentExit(target) => return self.handle_agent_exit(request.id, target),
             Method::AgentRead(params) => return self.handle_agent_read(request.id, params),
             Method::AgentExplain(target) => return self.handle_agent_explain(request.id, target),
             Method::AgentSend(params) => return self.handle_agent_send(request.id, params),
@@ -1922,6 +1937,39 @@ mod tests {
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();
         }
+    }
+
+    #[test]
+    fn pane_died_preserves_a_pane_awaiting_native_agent_resume() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            true,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let workspace = crate::workspace::Workspace::test_new("restart");
+        let pane_id = workspace.tabs[0].root_pane;
+        let terminal_id = workspace.terminal_id(pane_id).cloned().unwrap();
+        app.state.workspaces = vec![workspace];
+        app.state.ensure_test_terminals();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .pending_agent_resume_plan = Some(crate::agent_resume::AgentResumePlan {
+            agent: "codex".into(),
+            argv: vec!["codex".into(), "resume".into(), "session-123".into()],
+            dedupe_key: "session-123".into(),
+        });
+
+        app.handle_internal_event(AppEvent::PaneDied { pane_id });
+
+        assert!(app.find_pane(pane_id).is_some());
+        assert!(app.state.terminals[&terminal_id]
+            .pending_agent_resume_plan
+            .is_some());
     }
 
     #[cfg(windows)]

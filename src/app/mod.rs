@@ -5,6 +5,7 @@
 //! - `input.rs` — key/mouse → action translation
 
 pub(crate) mod actions;
+mod agent_lifecycle;
 mod agent_resume;
 mod agents;
 mod api;
@@ -127,6 +128,9 @@ pub struct App {
     pub(crate) loaded_host_cursor: crate::config::HostCursorModeConfig,
     pub(crate) agent_metadata_deadline: Option<Instant>,
     pub(crate) pending_agent_resume_deadline: Option<Instant>,
+    pub(crate) pending_agent_continuation_deadline: Option<Instant>,
+    pub(crate) pending_agent_continuations:
+        HashMap<crate::terminal::TerminalId, agent_lifecycle::PendingAgentContinuation>,
     pub(crate) selection_autoscroll_deadline: Option<Instant>,
     pub(crate) selection_highlight_clear_deadline: Option<Instant>,
     pub(crate) session_save_deadline: Option<Instant>,
@@ -723,6 +727,8 @@ impl App {
             loaded_host_cursor: config.ui.host_cursor,
             agent_metadata_deadline: None,
             pending_agent_resume_deadline: None,
+            pending_agent_continuation_deadline: None,
+            pending_agent_continuations: HashMap::new(),
             session_save_deadline: None,
             session_save_thread: None,
             selection_autoscroll_deadline: None,
