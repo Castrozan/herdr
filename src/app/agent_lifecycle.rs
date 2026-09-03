@@ -5,12 +5,32 @@ use bytes::Bytes;
 use super::App;
 
 const CHECK_INTERVAL: Duration = Duration::from_millis(100);
+const SUBMIT_DELAY: Duration = Duration::from_millis(250);
 const TIMEOUT: Duration = Duration::from_secs(60);
+
+#[derive(Clone)]
+enum PendingAgentContinuationPhase {
+    AwaitingAgentIdle { prompt: String },
+    AwaitingSubmit { submit_at: Instant },
+}
 
 pub(crate) struct PendingAgentContinuation {
     agent: crate::detect::Agent,
-    prompt: String,
+    phase: PendingAgentContinuationPhase,
     expires_at: Instant,
+}
+
+impl PendingAgentContinuation {
+    fn next_check_at(&self, now: Instant) -> Instant {
+        let requested_check = match self.phase {
+            PendingAgentContinuationPhase::AwaitingAgentIdle { .. } => now + CHECK_INTERVAL,
+            PendingAgentContinuationPhase::AwaitingSubmit { submit_at } if submit_at > now => {
+                submit_at
+            }
+            PendingAgentContinuationPhase::AwaitingSubmit { .. } => now + CHECK_INTERVAL,
+        };
+        self.expires_at.min(requested_check)
+    }
 }
 
 impl App {
@@ -25,7 +45,7 @@ impl App {
             terminal_id,
             PendingAgentContinuation {
                 agent,
-                prompt,
+                phase: PendingAgentContinuationPhase::AwaitingAgentIdle { prompt },
                 expires_at: now + TIMEOUT,
             },
         );
@@ -50,25 +70,44 @@ impl App {
                 completed.push(terminal_id);
                 continue;
             }
-            let ready = self
-                .state
-                .terminals
-                .get(&terminal_id)
-                .is_some_and(|terminal| {
-                    terminal.state == crate::detect::AgentState::Idle
-                        && terminal.effective_known_agent() == Some(pending.agent)
-                });
-            if !ready {
-                continue;
-            }
-            let Some(runtime) = self.terminal_runtimes.get(&terminal_id) else {
-                continue;
-            };
-            let mut input = pending.prompt.clone();
-            input.push('\r');
-            if runtime.try_send_bytes(Bytes::from(input)).is_ok() {
-                completed.push(terminal_id);
-                changed = true;
+            match pending.phase.clone() {
+                PendingAgentContinuationPhase::AwaitingAgentIdle { prompt } => {
+                    let ready = self
+                        .state
+                        .terminals
+                        .get(&terminal_id)
+                        .is_some_and(|terminal| {
+                            terminal.state == crate::detect::AgentState::Idle
+                                && terminal.effective_known_agent() == Some(pending.agent)
+                        });
+                    if !ready {
+                        continue;
+                    }
+                    let Some(runtime) = self.terminal_runtimes.get(&terminal_id) else {
+                        continue;
+                    };
+                    if runtime.try_send_bytes(Bytes::from(prompt)).is_ok() {
+                        self.pending_agent_continuations
+                            .get_mut(&terminal_id)
+                            .unwrap()
+                            .phase = PendingAgentContinuationPhase::AwaitingSubmit {
+                            submit_at: now + SUBMIT_DELAY,
+                        };
+                        changed = true;
+                    }
+                }
+                PendingAgentContinuationPhase::AwaitingSubmit { submit_at } => {
+                    if now < submit_at {
+                        continue;
+                    }
+                    let Some(runtime) = self.terminal_runtimes.get(&terminal_id) else {
+                        continue;
+                    };
+                    if runtime.try_send_bytes(Bytes::from("\r")).is_ok() {
+                        completed.push(terminal_id);
+                        changed = true;
+                    }
+                }
             }
         }
 
@@ -78,7 +117,7 @@ impl App {
         self.pending_agent_continuation_deadline = self
             .pending_agent_continuations
             .values()
-            .map(|pending| pending.expires_at.min(now + CHECK_INTERVAL))
+            .map(|pending| pending.next_check_at(now))
             .min();
         changed
     }
@@ -122,8 +161,13 @@ mod tests {
                 crate::detect::AgentState::Idle,
             );
 
-        assert!(app.deliver_pending_agent_continuations(Instant::now()));
-        assert_eq!(receiver.recv().await.unwrap(), Bytes::from("continue\r"));
+        let prompt_delivery_time = Instant::now();
+        assert!(app.deliver_pending_agent_continuations(prompt_delivery_time));
+        assert_eq!(receiver.recv().await.unwrap(), Bytes::from("continue"));
+        assert!(!app.deliver_pending_agent_continuations(prompt_delivery_time));
+        assert!(receiver.try_recv().is_err());
+        assert!(app.deliver_pending_agent_continuations(prompt_delivery_time + SUBMIT_DELAY));
+        assert_eq!(receiver.recv().await.unwrap(), Bytes::from("\r"));
         assert!(!app.pending_agent_continuations.contains_key(&terminal_id));
     }
 }
