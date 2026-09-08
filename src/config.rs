@@ -17,9 +17,10 @@ pub use self::{
         upsert_section_value,
     },
     keybinds::{
-        format_key_combo, normalize_key_combo, terminal_key_matches_combo, ActionKeybinds,
-        BindingConfig, CommandKeybindConfig, CustomCommandAction, CustomCommandKeybind,
-        IndexedKeybind, Keybinds, LiveKeybindConfig,
+        format_key_combo, normalize_key_combo, passthrough_processes_for_key,
+        terminal_key_matches_combo, ActionKeybinds, BindingConfig, CommandKeybindConfig,
+        CustomCommandAction, CustomCommandKeybind, IndexedKeybind, Keybinds, LiveKeybindConfig,
+        PassthroughKeybindConfig,
     },
     model::{
         validated_sidebar_bounds, AgentPanelSortConfig, Config, ConfigReloadReport,
@@ -211,6 +212,10 @@ new_tab = "prefix+t"
 [[keys.command]]
 key = "prefix+g"
 command = "lazygit"
+
+[[keys.passthrough]]
+key = "ctrl+pageup"
+processes = ["nvim"]
 "#,
         )
         .unwrap();
@@ -223,6 +228,8 @@ command = "lazygit"
         assert!(!profile.contains("lazygit"));
         assert!(!profile.contains("command ="));
         assert!(!profile.contains("[[keys.command]]"));
+        assert!(profile.contains("[[keys.passthrough]]"));
+        assert!(profile.contains("processes = [\"nvim\"]"));
     }
 
     #[test]

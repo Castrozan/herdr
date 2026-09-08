@@ -191,14 +191,17 @@ impl ClientShellState {
     }
 
     pub(super) fn open_navigator_overlay(&mut self) {
-        let expanded_workspaces =
+        let expanded_workspaces = if self.config.navigator_collapse_workspaces {
+            HashSet::new()
+        } else {
             super::aggregate_navigation::cached_endpoint_snapshots(&self.endpoints)
                 .flat_map(|endpoint| {
                     endpoint.snapshot.workspaces.iter().map(move |workspace| {
                         (endpoint.endpoint_id.clone(), workspace.workspace_id.clone())
                     })
                 })
-                .collect();
+                .collect()
+        };
         let mut navigator = ClientNavigatorOverlay {
             query: String::new(),
             search_focused: false,

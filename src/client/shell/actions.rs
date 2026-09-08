@@ -564,6 +564,61 @@ impl ClientShellState {
         }
         match pending.kind {
             PendingEndpointKind::Generic => {}
+            PendingEndpointKind::Passthrough {
+                pane_id,
+                key,
+                binding,
+                processes,
+            } => {
+                if matches!(
+                    &result,
+                    Err(error) if error.code.as_deref() == Some("endpoint_cancelled")
+                ) || self.mode != ClientShellMode::Terminal
+                    || self.overlay.is_some()
+                    || self.focused_pane_id().as_deref() != Some(pane_id.as_str())
+                {
+                    return (false, Vec::new());
+                }
+                let foreground_process_names =
+                    match &result {
+                        Ok(crate::api::schema::ResponseResult::PaneProcessInfo {
+                            process_info,
+                        }) if process_info.pane_id == pane_id => process_info
+                            .foreground_processes
+                            .iter()
+                            .flat_map(|process| {
+                                [
+                                    Some(process.name.to_ascii_lowercase()),
+                                    process.argv0.as_deref().map(|argv0| {
+                                        crate::detect::path_basename(argv0).to_ascii_lowercase()
+                                    }),
+                                ]
+                                .into_iter()
+                                .flatten()
+                            })
+                            .collect::<Vec<_>>(),
+                        _ => Vec::new(),
+                    };
+                let claimed = processes.iter().any(|expected| {
+                    foreground_process_names
+                        .iter()
+                        .any(|actual| actual == expected)
+                });
+                if claimed {
+                    let actions = crate::protocol::ClientPaneInputEvent::from_terminal_key(key)
+                        .map(|event| ClientShellAction::PaneInput {
+                            endpoint_id: self.active_endpoint_id.clone(),
+                            pane_id,
+                            event,
+                        })
+                        .into_iter()
+                        .collect();
+                    return (false, actions);
+                }
+                let mut outcome = ClientShellInput::default();
+                self.record_binding(binding, &mut outcome);
+                return (outcome.repaint, outcome.actions);
+            }
             PendingEndpointKind::ProductAnnouncementDismiss { version, id } => {
                 return match result {
                     Ok(_) => (false, Vec::new()),

@@ -2136,12 +2136,14 @@ impl TerminalState {
     pub fn border_label(&self, show_agent_labels: bool) -> Option<String> {
         self.effective_title().or_else(|| {
             self.manual_label.clone().or_else(|| {
-                show_agent_labels
-                    .then(|| {
-                        self.effective_display_agent()
-                            .or_else(|| self.effective_agent_label().map(str::to_string))
-                    })
-                    .flatten()
+                self.terminal_title_stripped().or_else(|| {
+                    show_agent_labels
+                        .then(|| {
+                            self.effective_display_agent()
+                                .or_else(|| self.effective_agent_label().map(str::to_string))
+                        })
+                        .flatten()
+                })
             })
         })
     }
@@ -3943,15 +3945,33 @@ mod tests {
         assert_eq!(terminal.border_label(false), None);
         assert_eq!(terminal.border_label(true).as_deref(), Some("claude"));
 
+        terminal.set_terminal_title(Some("⠋ terminal task".into()));
+        assert_eq!(
+            terminal.border_label(false).as_deref(),
+            Some("terminal task")
+        );
+        assert_eq!(
+            terminal.border_label(true).as_deref(),
+            Some("terminal task")
+        );
+
         terminal.set_manual_label(" reviewer ".into());
         assert_eq!(terminal.border_label(false).as_deref(), Some("reviewer"));
         assert_eq!(terminal.border_label(true).as_deref(), Some("reviewer"));
 
         terminal.set_manual_label("   ".into());
-        assert_eq!(terminal.border_label(true).as_deref(), Some("claude"));
+        assert_eq!(
+            terminal.border_label(true).as_deref(),
+            Some("terminal task")
+        );
 
         terminal.set_manual_label("reviewer".into());
         terminal.clear_manual_label();
+        assert_eq!(
+            terminal.border_label(true).as_deref(),
+            Some("terminal task")
+        );
+        terminal.set_terminal_title(None);
         assert_eq!(terminal.border_label(true).as_deref(), Some("claude"));
     }
 

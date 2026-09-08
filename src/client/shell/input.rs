@@ -478,6 +478,38 @@ impl ClientShellState {
         true
     }
 
+    fn defer_passthrough_key(
+        &mut self,
+        key: &crate::input::TerminalKey,
+        binding: crate::input::KeybindMatch,
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        let processes = crate::config::passthrough_processes_for_key(
+            &self.config.keybinds.keybinds.passthroughs,
+            key,
+        );
+        if processes.is_empty() {
+            return false;
+        }
+        let Some(pane_id) = self.focused_pane_id() else {
+            return false;
+        };
+        self.push_endpoint_method_with_kind(
+            crate::api::schema::Method::PaneProcessInfo(
+                crate::api::schema::PaneProcessInfoParams {
+                    pane_id: Some(pane_id.clone()),
+                },
+            ),
+            PendingEndpointKind::Passthrough {
+                pane_id,
+                key: key.clone(),
+                binding,
+                processes,
+            },
+            outcome,
+        )
+    }
+
     fn route_key_press(
         &mut self,
         key: &crate::input::TerminalKey,
@@ -544,6 +576,9 @@ impl ClientShellState {
                 if let Some(binding) =
                     crate::input::resolve_direct_binding(&self.config.keybinds.keybinds, key)
                 {
+                    if self.defer_passthrough_key(key, binding.clone(), outcome) {
+                        return None;
+                    }
                     self.record_binding(binding, outcome);
                     return None;
                 }

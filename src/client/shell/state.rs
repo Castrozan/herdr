@@ -86,6 +86,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) toast_delay_seconds: u64,
     pub(super) toast_position: crate::config::ToastHerdrPosition,
     pub(super) copy_on_select: bool,
+    pub(super) navigator_collapse_workspaces: bool,
     pub(super) clipboard_toast_enabled: bool,
     pub(super) clipboard_toast_position: crate::config::ToastClipboardPosition,
     pub(super) theme_name: String,
@@ -296,6 +297,11 @@ pub(crate) enum ClientShellAction {
         endpoint_id: ClientEndpointId,
         boot_id: String,
         request: Box<crate::api::schema::Request>,
+    },
+    PaneInput {
+        endpoint_id: ClientEndpointId,
+        pane_id: String,
+        event: crate::protocol::ClientPaneInputEvent,
     },
     ClipboardWrite(Vec<u8>),
     OpenSafeWebUrl(String),
@@ -665,6 +671,12 @@ impl ClientShellOverlay {
 #[derive(Debug)]
 pub(super) enum PendingEndpointKind {
     Generic,
+    Passthrough {
+        pane_id: String,
+        key: crate::input::TerminalKey,
+        binding: crate::input::KeybindMatch,
+        processes: Vec<String>,
+    },
     ProductAnnouncementDismiss {
         version: String,
         id: String,

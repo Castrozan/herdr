@@ -102,7 +102,7 @@ pub(crate) fn render_tab_bar(
         let rect = Rect::new(x, area.y, width, 1);
         let style = if tab.focused {
             let base = Style::default()
-                .fg(panel_contrast_fg(palette))
+                .fg(accent_contrast_fg(palette))
                 .bg(palette.accent);
             if tab.custom_label {
                 base.add_modifier(Modifier::BOLD)
@@ -283,7 +283,7 @@ fn render_tab_bar_status(
         let width = display_width(&segment.text);
         let style = if segment.accent {
             Style::default()
-                .fg(panel_contrast_fg(palette))
+                .fg(accent_contrast_fg(palette))
                 .bg(palette.accent)
                 .add_modifier(Modifier::BOLD)
         } else {
@@ -291,6 +291,22 @@ fn render_tab_bar_status(
         };
         put_text(buffer, x, area.y, width, &segment.text, style);
         x = x.saturating_add(width);
+    }
+}
+
+fn accent_contrast_fg(palette: &Palette) -> ratatui::style::Color {
+    let ratatui::style::Color::Rgb(red, green, blue) = palette.accent else {
+        return panel_contrast_fg(palette);
+    };
+    match (crate::terminal_theme::RgbColor {
+        r: red,
+        g: green,
+        b: blue,
+    })
+    .inferred_appearance()
+    {
+        crate::terminal_theme::HostAppearance::Light => ratatui::style::Color::Black,
+        crate::terminal_theme::HostAppearance::Dark => ratatui::style::Color::White,
     }
 }
 

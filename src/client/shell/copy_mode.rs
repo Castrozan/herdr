@@ -106,6 +106,23 @@ impl ClientShellState {
         if self.route_copy_search_prompt_key(key, outcome) {
             return;
         }
+        match (key.code, key.modifiers) {
+            (KeyCode::Left, KeyModifiers::CONTROL) => {
+                self.request_copy_motion(
+                    crate::api::schema::PaneCopyMotion::PreviousWordStart,
+                    outcome,
+                );
+                return;
+            }
+            (KeyCode::Right, KeyModifiers::CONTROL) => {
+                self.request_copy_motion(
+                    crate::api::schema::PaneCopyMotion::NextWordStart,
+                    outcome,
+                );
+                return;
+            }
+            _ => {}
+        }
         match key.code {
             KeyCode::Esc => {
                 let should_clear = self.copy_mode.as_ref().is_some_and(|copy_mode| {
