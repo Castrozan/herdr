@@ -906,6 +906,12 @@
           "description": "Automatically copy text selected by mouse drag or double-click. When disabled, Ctrl+C or a host-forwarded Cmd+C copies and clears the retained selection."
         },
         {
+          "key": "ui.navigator_collapse_workspaces",
+          "type": "boolean",
+          "default": "false",
+          "description": "Start the session navigator with workspace rows collapsed."
+        },
+        {
           "key": "ui.host_cursor",
           "type": "enum",
           "default": "auto",

@@ -144,6 +144,16 @@ split_horizontal = "prefix+minus"
 
 The default keymap is prefix-first so Herdr does not steal input from shells, editors, tmux, or terminal apps. Search `keys.` in the [Config reference](/docs/config-reference/) to see every action and default binding. The in-app help panel at `prefix+?` shows the active bindings.
 
+Use process passthrough when a direct chord should belong to a pane app only while an exact process is in the foreground:
+
+```toml
+[[keys.passthrough]]
+key = "ctrl+left"
+processes = ["nvim"]
+```
+
+When the focused process name or `argv[0]` basename matches an entry, Herdr sends the original key to that pane. Otherwise, Herdr runs its normal client-local binding for the chord. Passthrough entries accept direct modified chords; prefix bindings are rejected.
+
 A binding may also be an array when one action needs multiple shortcuts:
 
 ```toml
