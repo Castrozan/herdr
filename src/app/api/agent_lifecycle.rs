@@ -58,7 +58,9 @@ impl App {
             );
         };
 
-        let terminal = self.state.terminals.get_mut(&terminal_id).unwrap();
+        let Some(terminal) = self.state.terminals.get_mut(&terminal_id) else {
+            return agent_not_found(id, &params.target);
+        };
         terminal.clear_agent_runtime_identity_after_respawn();
         terminal.pending_agent_resume_plan = Some(plan);
         if let Some(prompt) = params.prompt.filter(|prompt| !prompt.is_empty()) {
