@@ -8,13 +8,14 @@ pub(super) fn is_background_agent_service(
         return false;
     }
 
+    if let Some(arguments) = process.argv.as_deref() {
+        return contains_service_subcommand(arguments.iter().map(String::as_str));
+    }
+
     process
-        .argv
+        .cmdline
         .as_deref()
-        .is_some_and(|arguments| contains_service_subcommand(arguments.iter().map(String::as_str)))
-        || process.cmdline.as_deref().is_some_and(|command_line| {
-            contains_service_subcommand(command_line.split_whitespace())
-        })
+        .is_some_and(|command_line| command_line.split_whitespace().any(is_service_token))
 }
 
 fn contains_service_subcommand<'a>(arguments: impl IntoIterator<Item = &'a str>) -> bool {

@@ -85,3 +85,16 @@ fn identify_agent_in_job_keeps_service_name_used_as_global_option_value() {
         Some((Agent::Codex, "codex".to_string()))
     );
 }
+
+#[test]
+fn identify_agent_in_job_ignores_cmdline_only_service_with_spaced_executable() {
+    let mut process = foreground_process(11, "codex", &["codex", "app-server"]);
+    process.argv = None;
+    process.cmdline = Some(r#""C:\Program Files\codex.exe" app-server"#.into());
+    let job = crate::platform::ForegroundJob {
+        process_group_id: 11,
+        processes: vec![process],
+    };
+
+    assert_eq!(identify_agent_in_job(&job), None);
+}
