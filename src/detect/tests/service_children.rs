@@ -51,3 +51,37 @@ fn identify_agent_in_job_ignores_codex_app_server_child_of_claude() {
         Some((Agent::Claude, "claude".to_string()))
     );
 }
+
+#[test]
+fn identify_agent_in_job_keeps_service_name_used_as_codex_exec_prompt() {
+    let job = crate::platform::ForegroundJob {
+        process_group_id: 11,
+        processes: vec![foreground_process(
+            11,
+            "codex",
+            &["codex", "exec", "mcp-server"],
+        )],
+    };
+
+    assert_eq!(
+        identify_agent_in_job(&job),
+        Some((Agent::Codex, "codex".to_string()))
+    );
+}
+
+#[test]
+fn identify_agent_in_job_keeps_service_name_used_as_global_option_value() {
+    let job = crate::platform::ForegroundJob {
+        process_group_id: 11,
+        processes: vec![foreground_process(
+            11,
+            "codex",
+            &["codex", "--model", "mcp-server"],
+        )],
+    };
+
+    assert_eq!(
+        identify_agent_in_job(&job),
+        Some((Agent::Codex, "codex".to_string()))
+    );
+}
