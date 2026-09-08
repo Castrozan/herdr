@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use super::*;
+mod lifecycle;
 
 fn protocol_schema_entry<T: schemars::JsonSchema>(name: &str) -> serde_json::Value {
     let mut schema = serde_json::to_value(schemars::schema_for!(T)).unwrap();

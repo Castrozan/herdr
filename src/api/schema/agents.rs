@@ -1,3 +1,6 @@
+mod lifecycle;
+pub use lifecycle::*;
+
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
