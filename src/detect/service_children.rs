@@ -19,9 +19,8 @@ pub(super) fn is_background_agent_service(
 }
 
 fn contains_service_subcommand<'a>(arguments: impl IntoIterator<Item = &'a str>) -> bool {
-    let arguments = arguments.into_iter().collect::<Vec<_>>();
-    let mut index = 1;
-    while let Some(argument) = arguments.get(index) {
+    let mut arguments = arguments.into_iter().skip(1);
+    while let Some(argument) = arguments.next() {
         let argument = argument.trim_matches(['"', '\'']);
         if is_service_token(argument) {
             return true;
@@ -29,7 +28,9 @@ fn contains_service_subcommand<'a>(arguments: impl IntoIterator<Item = &'a str>)
         if argument == "--" || !argument.starts_with('-') {
             return false;
         }
-        index += if option_takes_value(argument) { 2 } else { 1 };
+        if option_takes_value(argument) {
+            arguments.next();
+        }
     }
     false
 }
