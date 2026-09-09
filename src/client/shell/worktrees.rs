@@ -547,6 +547,7 @@ impl ClientShellState {
             }
             (
                 PendingEndpointKind::Generic
+                | PendingEndpointKind::Passthrough { .. }
                 | PendingEndpointKind::ProductAnnouncementDismiss { .. }
                 | PendingEndpointKind::ReleaseNotesDismiss
                 | PendingEndpointKind::PopupCommand

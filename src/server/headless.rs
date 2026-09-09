@@ -3127,6 +3127,7 @@ impl HeadlessServer {
             }
         }
         let _ = msg.respond_to.send(response);
+        self.app.shutdown_detached_terminal_runtimes();
 
         if let Some(revision_before) = pane_graphics_revision_before {
             changed |= revision_before != self.app.pane_graphics.revision();
@@ -3377,6 +3378,7 @@ impl HeadlessServer {
                 .app
                 .start_pending_agent_resumes(self.app.pending_agent_resume_due(now));
         }
+        changed |= self.app.deliver_pending_agent_continuations(now);
         changed
     }
 }

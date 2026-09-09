@@ -1,5 +1,7 @@
 use super::*;
 
+pub(in crate::client::shell) mod process_passthrough;
+
 impl ClientShellState {
     pub(super) fn record_binding(
         &mut self,
@@ -577,6 +579,14 @@ impl ClientShellState {
         }
         match pending.kind {
             PendingEndpointKind::Generic => {}
+            PendingEndpointKind::Passthrough {
+                pane_id,
+                key,
+                binding,
+                processes,
+            } => {
+                return self.complete_passthrough_key(pane_id, key, binding, processes, &result);
+            }
             PendingEndpointKind::ProductAnnouncementDismiss { version, id } => {
                 return match result {
                     Ok(_) => (false, Vec::new()),

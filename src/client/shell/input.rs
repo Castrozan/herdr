@@ -551,6 +551,9 @@ impl ClientShellState {
                 if let Some(binding) =
                     crate::input::resolve_direct_binding(&self.config.keybinds.keybinds, key)
                 {
+                    if self.defer_passthrough_key(key, binding.clone(), outcome) {
+                        return None;
+                    }
                     self.record_binding(binding, outcome);
                     return None;
                 }

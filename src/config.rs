@@ -3,6 +3,8 @@ use crossterm::event::{KeyCode, KeyModifiers};
 mod io;
 mod keybinds;
 mod model;
+#[cfg(test)]
+mod process_passthrough_tests;
 mod sidebar;
 mod sound;
 mod tab_bar;
@@ -17,9 +19,10 @@ pub use self::{
         upsert_section_value,
     },
     keybinds::{
-        format_key_combo, normalize_key_combo, terminal_key_matches_combo, ActionKeybinds,
-        BindingConfig, CommandKeybindConfig, CustomCommandAction, CustomCommandKeybind,
-        IndexedKeybind, Keybinds, LiveKeybindConfig,
+        format_key_combo, normalize_key_combo, passthrough_processes_for_key,
+        terminal_key_matches_combo, ActionKeybinds, BindingConfig, CommandKeybindConfig,
+        CustomCommandAction, CustomCommandKeybind, IndexedKeybind, Keybinds, LiveKeybindConfig,
+        PassthroughKeybindConfig,
     },
     model::{
         validated_sidebar_bounds, AgentPanelSortConfig, Config, ConfigReloadReport,

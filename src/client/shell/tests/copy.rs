@@ -494,6 +494,33 @@ fn keyboard_copy_mode_content_motion_is_endpoint_backed_and_stale_safe() {
 }
 
 #[test]
+fn navigator_collapse_workspaces_option_starts_at_workspace_rows() {
+    let mut config = Config::default();
+    config.ui.navigator_collapse_workspaces = true;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snapshot()));
+
+    state.open_navigator_overlay();
+
+    let ClientShellOverlay::Navigator(navigator) = state.overlay.as_mut().expect("navigator")
+    else {
+        panic!("expected navigator");
+    };
+    assert!(navigator.expanded_workspaces.is_empty());
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    assert!(rows
+        .iter()
+        .all(|row| matches!(row.target, ClientNavigatorTarget::Workspace { .. })));
+    navigator.query = "pane 1".into();
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    assert!(rows
+        .iter()
+        .any(|row| matches!(row.target, ClientNavigatorTarget::Pane { .. })));
+}
+
+#[test]
 fn copy_search_owns_prompt_repeat_highlights_selection_and_restore() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));

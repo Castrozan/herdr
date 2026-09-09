@@ -4,6 +4,7 @@
 //! - `actions.rs` — state mutations (testable without PTYs/async)
 
 pub(crate) mod actions;
+mod agent_lifecycle;
 mod agent_resume;
 pub(crate) mod agent_view;
 mod agents;
@@ -135,6 +136,9 @@ pub struct App {
     pub(crate) update_manifest_check_enabled: bool,
     pub(crate) loaded_host_cursor: crate::config::HostCursorModeConfig,
     pub(crate) agent_metadata_deadline: Option<Instant>,
+    pub(crate) pending_agent_continuation_deadline: Option<Instant>,
+    pub(crate) pending_agent_continuations:
+        HashMap<crate::terminal::TerminalId, agent_lifecycle::PendingAgentContinuation>,
     pub(crate) pending_agent_resume_deadline: Option<Instant>,
     pub(crate) session_save_deadline: Option<Instant>,
     pub(crate) session_save_thread: Option<std::thread::JoinHandle<()>>,
@@ -596,6 +600,8 @@ impl App {
             update_manifest_check_enabled: config.update.manifest_check,
             loaded_host_cursor: config.ui.host_cursor,
             agent_metadata_deadline: None,
+            pending_agent_continuation_deadline: None,
+            pending_agent_continuations: HashMap::new(),
             pending_agent_resume_deadline: None,
             session_save_deadline: None,
             session_save_thread: None,

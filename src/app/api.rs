@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+mod agent_lifecycle;
 mod agent_view;
 mod agents;
 mod env;
@@ -23,6 +24,7 @@ const WINDOWS_POWERSHELL_AGENT_EXIT_RESPAWN_GRACE: Duration = Duration::from_sec
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeExitAction {
+    ResumeAgent,
     RespawnShell,
     ClosePane,
 }
@@ -216,13 +218,22 @@ impl App {
                     self.refresh_new_herdr_toast_context_for_update(&update, &previous_toast);
                     self.emit_pane_state_update(&update);
                 }
-                if self.runtime_exit_action(*pane_id) == RuntimeExitAction::RespawnShell
-                    && self.respawn_shell_for_launch_pane(*pane_id, true)
-                {
-                    self.overlay_panes.remove(pane_id);
-                    self.render_dirty.request_generic();
-                    self.render_notify.notify_one();
-                    return worktree_restore_updates;
+                match self.runtime_exit_action(*pane_id) {
+                    RuntimeExitAction::ResumeAgent => {
+                        self.overlay_panes.remove(pane_id);
+                        self.render_dirty.request_generic();
+                        self.render_notify.notify_one();
+                        return worktree_restore_updates;
+                    }
+                    RuntimeExitAction::RespawnShell
+                        if self.respawn_shell_for_launch_pane(*pane_id, true) =>
+                    {
+                        self.overlay_panes.remove(pane_id);
+                        self.render_dirty.request_generic();
+                        self.render_notify.notify_one();
+                        return worktree_restore_updates;
+                    }
+                    RuntimeExitAction::RespawnShell | RuntimeExitAction::ClosePane => {}
                 }
             }
         }
@@ -502,7 +513,11 @@ impl App {
             return RuntimeExitAction::ClosePane;
         };
 
-        if terminal.respawn_shell_on_exit || self.should_respawn_shell_after_agent_exit(terminal) {
+        if terminal.pending_agent_resume_plan.is_some() {
+            RuntimeExitAction::ResumeAgent
+        } else if terminal.respawn_shell_on_exit
+            || self.should_respawn_shell_after_agent_exit(terminal)
+        {
             RuntimeExitAction::RespawnShell
         } else {
             RuntimeExitAction::ClosePane
@@ -1062,6 +1077,8 @@ impl App {
                 return self.handle_agent_view_clear(request.id, params)
             }
             Method::AgentStart(params) => return self.handle_agent_start(request.id, params),
+            Method::AgentRestart(params) => return self.handle_agent_restart(request.id, params),
+            Method::AgentExit(target) => return self.handle_agent_exit(request.id, target),
             Method::AgentPrompt(_) => {
                 return responses::encode_error(
                     request.id,
@@ -1370,6 +1387,8 @@ mod tests {
     use super::*;
     use crate::detect::{Agent, AgentState};
 
+    mod lifecycle;
+    mod tab_labels;
     #[cfg(unix)]
     fn init_repo(path: &std::path::Path) {
         let status = std::process::Command::new("git")
