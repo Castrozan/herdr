@@ -208,9 +208,11 @@ fn surface_with_popup() -> PaneSurfaceFrame {
     surface
 }
 
+mod accent_contrast;
 mod agents_worktrees_notifications;
 mod chrome_context;
 mod copy;
+mod copy_navigation;
 mod endpoint_requests;
 mod endpoints;
 #[path = "input.rs"]
@@ -219,4 +221,5 @@ mod keybindings_settings;
 mod mobile;
 mod mouse_selection;
 mod popup_focus_projection;
+mod process_passthrough;
 mod startup_overlays;

@@ -25,6 +25,19 @@ pub(super) fn dispatch_client_shell_actions(
                     repaint |= shell.cancel_endpoint_request(&request.id);
                 }
             }
+            shell::ClientShellAction::PaneInput {
+                endpoint_id,
+                pane_id,
+                event,
+            } => {
+                endpoints.send_to(
+                    &endpoint_id,
+                    &ClientMessage::ClientShellPaneInput {
+                        pane_id,
+                        events: vec![event],
+                    },
+                );
+            }
             shell::ClientShellAction::ClipboardWrite(bytes) => {
                 crate::selection::write_osc52_bytes(&bytes);
             }

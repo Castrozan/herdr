@@ -157,6 +157,7 @@ impl App {
             self.next_auto_update_check,
             self.next_agent_manifest_update_check,
             self.agent_metadata_deadline,
+            self.pending_agent_continuation_deadline,
             self.pending_agent_resume_deadline,
             self.session_save_deadline,
             self.next_tab_bar_status_deadline(),

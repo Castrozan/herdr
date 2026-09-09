@@ -1,6 +1,10 @@
 use super::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 
+mod control_arrow_navigation;
+
+use control_arrow_navigation::ControlArrowNavigation;
+
 impl ClientShellState {
     pub(super) fn reset_copy_pipeline(&mut self) {
         self.copy_session_generation = self.copy_session_generation.saturating_add(1);
@@ -104,6 +108,15 @@ impl ClientShellState {
         outcome: &mut ClientShellInput,
     ) {
         if self.route_copy_search_prompt_key(key, outcome) {
+            return;
+        }
+        if let Some(navigation) = control_arrow_navigation::resolve(key) {
+            match navigation {
+                ControlArrowNavigation::MoveRows(rows) => self.move_copy_cursor(rows, 0, outcome),
+                ControlArrowNavigation::MoveWord(motion) => {
+                    self.request_copy_motion(motion, outcome)
+                }
+            }
             return;
         }
         match key.code {

@@ -324,6 +324,10 @@ command = "local-only"
 [keys]
 prefix = "ctrl+x"
 new_tab = "prefix+n"
+
+[[keys.passthrough]]
+key = "ctrl+pageup"
+processes = ["nvim"]
 "#,
     )
     .unwrap();
@@ -362,6 +366,10 @@ new_tab = "prefix+n"
     assert_eq!(
         state.config.keybinds.keybinds.custom_commands[0].command,
         "cmd_remote"
+    );
+    assert_eq!(
+        state.config.keybinds.keybinds.passthroughs[0].processes,
+        ["nvim"]
     );
 }
 

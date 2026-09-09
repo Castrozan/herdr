@@ -14,6 +14,9 @@ use crate::terminal::TerminalId;
 mod metadata;
 pub use metadata::{AgentMetadata, AgentMetadataReport, EffectivePresentation};
 
+#[cfg(test)]
+mod label_precedence;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HookAuthority {
     pub source: String,
@@ -2136,12 +2139,14 @@ impl TerminalState {
     pub fn border_label(&self, show_agent_labels: bool) -> Option<String> {
         self.effective_title().or_else(|| {
             self.manual_label.clone().or_else(|| {
-                show_agent_labels
-                    .then(|| {
-                        self.effective_display_agent()
-                            .or_else(|| self.effective_agent_label().map(str::to_string))
-                    })
-                    .flatten()
+                self.terminal_title_stripped().or_else(|| {
+                    show_agent_labels
+                        .then(|| {
+                            self.effective_display_agent()
+                                .or_else(|| self.effective_agent_label().map(str::to_string))
+                        })
+                        .flatten()
+                })
             })
         })
     }

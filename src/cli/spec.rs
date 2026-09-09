@@ -431,6 +431,12 @@ fn agent_command() -> Command {
                 ),
         )
         .subcommand(
+            Command::new("restart")
+                .about("Restart the current native agent")
+                .arg(option("prompt", "TEXT")),
+        )
+        .subcommand(Command::new("exit").about("Exit the current native agent"))
+        .subcommand(
             Command::new("explain")
                 .about("Explain agent detection state")
                 .arg(Arg::new("target").value_name("TARGET"))

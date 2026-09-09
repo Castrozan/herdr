@@ -103,6 +103,27 @@ pub struct CommandKeybindConfig {
     pub height: Option<PopupSize>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct PassthroughKeybindConfig {
+    pub key: BindingConfig,
+    pub processes: Vec<String>,
+}
+
+impl Default for PassthroughKeybindConfig {
+    fn default() -> Self {
+        Self {
+            key: BindingConfig::empty(),
+            processes: Vec::new(),
+        }
+    }
+}
+
+mod process_passthrough;
+
+use process_passthrough::compile_passthrough_bindings;
+pub use process_passthrough::{passthrough_processes_for_key, CompiledPassthroughBinding};
+
 impl Default for CommandKeybindConfig {
     fn default() -> Self {
         Self {
@@ -370,6 +391,7 @@ pub struct Keybinds {
     pub resize_pane_right: ActionKeybinds,
     pub toggle_sidebar: ActionKeybinds,
     pub custom_commands: Vec<CustomCommandKeybind>,
+    pub passthroughs: Vec<CompiledPassthroughBinding>,
 }
 
 impl Default for Keybinds {
@@ -538,6 +560,7 @@ impl Config {
             resize_pane_right: empty_action!(),
             toggle_sidebar: empty_action!(),
             custom_commands: Vec::new(),
+            passthroughs: Vec::new(),
         };
 
         macro_rules! field_source {
@@ -721,6 +744,9 @@ impl Config {
                 );
             }
         }
+
+        keybinds.passthroughs =
+            compile_passthrough_bindings(&self.keys.passthrough, &mut diagnostics);
 
         (prefix_diag, prefix, diagnostics, keybinds)
     }
@@ -1264,6 +1290,8 @@ pub(crate) fn parse_key_combo(s: &str) -> Option<KeyCombo> {
         "right" => KeyCode::Right,
         "up" => KeyCode::Up,
         "down" => KeyCode::Down,
+        "pageup" | "page_up" => KeyCode::PageUp,
+        "pagedown" | "page_down" => KeyCode::PageDown,
         "minus" => KeyCode::Char('-'),
         "comma" => KeyCode::Char(','),
         "period" => KeyCode::Char('.'),

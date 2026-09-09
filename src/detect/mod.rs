@@ -5,6 +5,7 @@
 
 pub mod manifest;
 pub mod manifest_update;
+mod service_children;
 
 /// The detected state of a terminal pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -248,7 +249,9 @@ pub fn identify_agent_in_job(job: &crate::platform::ForegroundJob) -> Option<(Ag
     {
         let candidate = normalized_process_name(process);
         if let Some(agent) = identify_agent(&candidate) {
-            return Some((agent, candidate));
+            if !service_children::is_background_agent_service(process, agent) {
+                return Some((agent, candidate));
+            }
         }
     }
 
@@ -259,6 +262,9 @@ pub fn identify_agent_in_job(job: &crate::platform::ForegroundJob) -> Option<(Ag
         let Some(agent) = identify_agent(&candidate) else {
             continue;
         };
+        if service_children::is_background_agent_service(process, agent) {
+            continue;
+        }
         let score = process_priority(process, &candidate);
 
         match &best {
@@ -728,6 +734,7 @@ fn is_python_runtime(name: &str) -> bool {
 mod tests {
     use super::*;
 
+    mod service_children;
     fn foreground_process(
         pid: u32,
         name: &str,

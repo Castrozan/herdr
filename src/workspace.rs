@@ -18,6 +18,7 @@ use crate::terminal::{TerminalId, TerminalRuntime, TerminalRuntimeRegistry, Term
 mod aggregate;
 mod git;
 mod tab;
+mod tab_labels;
 
 use self::git::git_status_cache_key_for_space;
 pub(crate) use self::{git::git_status_snapshot_for_cwd_with_demand, tab::MovedPane};

@@ -4,9 +4,9 @@ use crossterm::event::KeyModifiers;
 use serde::{de, Deserialize, Deserializer, Serialize};
 
 use super::{
-    ActionKeybinds, BindingConfig, CommandKeybindConfig, IndexedKeybind, Keybinds, SidebarConfig,
-    SoundConfig, TabBarRightEntryConfig, ThemeConfig, DEFAULT_MOBILE_WIDTH_THRESHOLD,
-    DEFAULT_MOUSE_SCROLL_LINES, DEFAULT_SCROLLBACK_LIMIT_BYTES,
+    ActionKeybinds, BindingConfig, CommandKeybindConfig, IndexedKeybind, Keybinds,
+    PassthroughKeybindConfig, SidebarConfig, SoundConfig, TabBarRightEntryConfig, ThemeConfig,
+    DEFAULT_MOBILE_WIDTH_THRESHOLD, DEFAULT_MOUSE_SCROLL_LINES, DEFAULT_SCROLLBACK_LIMIT_BYTES,
 };
 
 pub const MAX_TOAST_DELAY_SECONDS: u64 = 3600;
@@ -455,6 +455,8 @@ pub struct KeysConfig {
     /// Prefix-mode custom command bindings.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub command: Vec<CommandKeybindConfig>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub passthrough: Vec<PassthroughKeybindConfig>,
     #[serde(skip_serializing)]
     pub(crate) user_fields: BTreeSet<&'static str>,
 }
@@ -584,6 +586,8 @@ pub(crate) struct KeysConfigOverlay {
     indexed: Option<IndexedKeysConfig>,
     #[serde(skip_serializing)]
     command: Option<Vec<CommandKeybindConfig>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    passthrough: Option<Vec<PassthroughKeybindConfig>>,
 }
 
 impl KeysConfigOverlay {
@@ -670,6 +674,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(toggle_sidebar);
         apply_field!(indexed);
         apply_field!(command);
+        apply_field!(passthrough);
 
         Ok(keys)
     }
@@ -773,6 +778,7 @@ impl KeysConfig {
         copy_effective_action_field!(resize_pane_right, keybinds.resize_pane_right);
         copy_effective_action_field!(toggle_sidebar, keybinds.toggle_sidebar);
         copy_user_field!(indexed);
+        copy_user_field!(passthrough);
 
         profile
     }
@@ -916,6 +922,7 @@ pub struct UiConfig {
     pub mouse_capture: bool,
     /// Copy text selected with the mouse. Default: true.
     pub copy_on_select: bool,
+    pub navigator_collapse_workspaces: bool,
     /// Host cursor policy. Default: auto.
     pub host_cursor: HostCursorModeConfig,
     /// Modifier that lets right-click gestures pass through to pane apps. Empty disables it.
@@ -1142,6 +1149,7 @@ impl Default for KeysConfig {
             toggle_sidebar: BindingConfig::one("prefix+b"),
             indexed: IndexedKeysConfig::default(),
             command: Vec::new(),
+            passthrough: Vec::new(),
             user_fields: BTreeSet::new(),
         }
     }
@@ -1166,6 +1174,7 @@ impl Default for UiConfig {
             mobile_width_threshold: DEFAULT_MOBILE_WIDTH_THRESHOLD,
             mouse_capture: true,
             copy_on_select: true,
+            navigator_collapse_workspaces: false,
             host_cursor: HostCursorModeConfig::Auto,
             right_click_passthrough_modifier: RightClickPassthroughModifierConfig::default(),
             redraw_on_focus_gained: true,

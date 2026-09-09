@@ -1,5 +1,9 @@
 use super::*;
 
+mod accent_contrast;
+
+use accent_contrast::accent_contrast_fg;
+
 const TAB_SCROLL_BUTTON_WIDTH: u16 = 3;
 const MIN_TAB_STRIP_WIDTH: u16 =
     MIN_TAB_WIDTH + NEW_TAB_WIDTH + TAB_SCROLL_BUTTON_WIDTH.saturating_mul(2);
@@ -102,7 +106,7 @@ pub(crate) fn render_tab_bar(
         let rect = Rect::new(x, area.y, width, 1);
         let style = if tab.focused {
             let base = Style::default()
-                .fg(panel_contrast_fg(palette))
+                .fg(accent_contrast_fg(palette))
                 .bg(palette.accent);
             if tab.custom_label {
                 base.add_modifier(Modifier::BOLD)
@@ -283,7 +287,7 @@ fn render_tab_bar_status(
         let width = display_width(&segment.text);
         let style = if segment.accent {
             Style::default()
-                .fg(panel_contrast_fg(palette))
+                .fg(accent_contrast_fg(palette))
                 .bg(palette.accent)
                 .add_modifier(Modifier::BOLD)
         } else {
